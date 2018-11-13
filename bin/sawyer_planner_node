@@ -1,0 +1,21 @@
+#!/usr/bin/env python
+
+import rospy
+
+from sawyer_planner import sawyer_planner_node
+
+
+if __name__ == "__main__":
+
+    rospy.init_node('sawyer_planner')
+    rate = rospy.Rate(1000)
+
+    planner = sawyer_planner_node.SawyerPlanner()
+
+    while not rospy.is_shutdown():
+
+        planner.update()
+
+        rate.sleep()
+
+    rospy.on_shutdown(planner.clean)

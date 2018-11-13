@@ -1,0 +1,55 @@
+#!/usr/bin/env python
+
+import rospy
+import numpy
+
+from geometry_msgs.msg import Point
+
+
+
+class MovingGoal:
+
+    def __init__(self):
+
+        self.position_pub = rospy.Publisher("/sawyer_planner/goal", Point, queue_size = 1)
+
+        # default parameters
+        self.DEFAULT_POSITION = [0.0, 0.0, 2.0] # if we will forget the parameters, the robot will go up
+        self.DEFAULT_SIGMA = 0.001
+
+        position_param_name = rospy.search_param('position')
+        sigma_param_name = rospy.search_param('sigma')
+
+        if (position_param_name == None or sigma_param_name == None):
+            rospy.logwarn('Setting default parameters!')
+            self.position = numpy.array(self.DEFAULT_POSITION)
+            self.sigma = numpy.array(self.DEFAULT_SIGMA)
+        else:
+            self.position = numpy.array(rospy.get_param(position_param_name))
+            self.sigma = numpy.array(rospy.get_param(sigma_param_name))
+
+        if self.sigma.size == 1.0:
+            self.sigma = numpy.ones(3) * self.sigma
+
+    def update_position(self):
+
+        covariance = numpy.diag(self.sigma**2)
+
+        new_position = numpy.random.multivariate_normal(self.position, covariance)
+
+        new_position_point = Point(new_position[0], new_position[1], new_position[2])
+        self.position_pub.publish(new_position_point)
+
+    def clean(self):
+
+        # on shutdown
+
+        position_param_name = rospy.search_param('position')
+        sigma_param_name = rospy.search_param('sigma')
+        
+        if (position_param_name != None):
+            rospy.delete_param(position_param_name)
+
+        if (sigma_param_name != None):
+            rospy.delete_param(sigma_param_name)
+       

@@ -1,0 +1,12 @@
+<launch>
+
+    <include file="$(find sawyer_planner)/launch/dynamixel.launch"/>
+
+    <node name="goal_manager_node" pkg="sawyer_planner" type="goal_manager_node" output="screen"/>
+
+    <node name="hydra_bridge_node" pkg="sawyer_planner" type="hydra_bridge_node" output="screen"/>
+
+    <node name="gripper" pkg="sawyer_planner" type="gripper" output="screen"/>
+
+</launch>
+

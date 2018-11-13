@@ -1,0 +1,6 @@
+<launch>
+    <node name="moving_goal" pkg="sawyer_planner" type="moving_goal" output="screen">
+        <rosparam command="load" file="$(find sawyer_planner)/params/moving_goal_params.yaml"/>
+    </node>
+</launch>
+

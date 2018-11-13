@@ -1,0 +1,18 @@
+#!/usr/bin/env python
+
+import rospy
+
+from sawyer_planner import gripper
+
+
+if __name__ == "__main__":
+
+    rospy.init_node('gripper')
+    rate = rospy.Rate(200)
+
+    gr = gripper.Gripper()
+
+    while not rospy.is_shutdown():
+        rate.sleep()
+
+    rospy.on_shutdown(gr.clean)
