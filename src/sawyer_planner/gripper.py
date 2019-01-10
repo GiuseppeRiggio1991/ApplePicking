@@ -72,10 +72,13 @@ class Gripper:
         called = False
 
         while self.revolutions < self.MAX_REVOLUTIONS:
+            # print("debug 1")
             if (not called) and self.velocity_client(right_vel, left_vel):
+                # print("debug 2")
                 called = True
 
         while not self.velocity_client(0, 0):
+            # print("debug 3")
             pass
 
         time.sleep(0.1)
@@ -98,10 +101,13 @@ class Gripper:
         called = False
 
         while self.revolutions < self.MAX_REVOLUTIONS:
+            print("debug 1")
             if (not called) and self.velocity_client(right_vel, left_vel):
+                print("debug 2")
                 called = True
 
         while not self.velocity_client(0, 0):
+            print("debug 3")
             pass
 
         time.sleep(0.1)

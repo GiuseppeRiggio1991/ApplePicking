@@ -11,11 +11,14 @@ from prpy.planning.cbirrt import CBiRRTPlanner
 from copy import *
 
 import rospy
+import rospkg
 from intera_core_msgs.msg import EndpointState, JointLimits
 from geometry_msgs.msg import Point
+from geometry_msgs.msg import Pose
 from std_msgs.msg import Bool
 from std_srvs.srv import SetBool, Trigger
 from sawyer_planner.srv import AppleCheck, AppleCheckRequest, AppleCheckResponse
+from online_planner.srv import *
 
 import intera_interface
 
@@ -30,8 +33,10 @@ class SawyerPlanner:
         self.STATE = enum.Enum('STATE', 'SEARCH TO_NEXT APPROACH GRAB CHECK_GRASPING TO_DROP DROP')
 
         self.goal = [None]
+        self.ee_position = None
 
         rospy.Subscriber("/robot/limb/right/endpoint_state", EndpointState, self.get_robot_ee_position, queue_size = 1)
+        rospy.wait_for_message("/robot/limb/right/endpoint_state", EndpointState)
         rospy.Subscriber("/sawyer_planner/goal", Point, self.get_goal, queue_size = 1)
         rospy.Subscriber("/robot/joint_limits", JointLimits, self.get_joint_limits, queue_size = 1)
         self.enable_bridge_pub = rospy.Publisher("/sawyer_planner/enable_bridge", Bool, queue_size = 1)
@@ -39,6 +44,7 @@ class SawyerPlanner:
         self.gripper_client = rospy.ServiceProxy('/gripper_action', SetBool)
         self.apple_check_client = rospy.ServiceProxy("/sawyer_planner/apple_check", AppleCheck)
         self.start_pipeline_client = rospy.ServiceProxy("/sawyer_planner/start_pipeline", Trigger)
+        self.plan_pose_client = rospy.ServiceProxy("plan_pose_srv", PlanPose)
 
         time.sleep(0.5)
         
@@ -77,15 +83,15 @@ class SawyerPlanner:
 
         # open the TCP socket to the planner
         # I will parametrize all this stuff
-        TCP_IP = '192.168.1.103' 
-        TCP_PORT = 5007
-        self.BUFFER_SIZE = 1024
-        self.socket_handler = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket_handler.settimeout(2.0)
-        self.socket_handler.connect((TCP_IP, TCP_PORT))
+        # TCP_IP = '192.168.1.103' 
+        # TCP_PORT = 5007
+        # self.BUFFER_SIZE = 1024
+        # self.socket_handler = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # self.socket_handler.settimeout(2.0)
+        # self.socket_handler.connect((TCP_IP, TCP_PORT))
 
 
-        rospy.Timer(rospy.Duration(0.05), self.socket_handshake)
+        # rospy.Timer(rospy.Duration(0.05), self.socket_handshake)
 
         self.state = self.STATE.SEARCH
 
@@ -94,8 +100,12 @@ class SawyerPlanner:
         self.env = openravepy.Environment()
         InitOpenRAVELogging()
         module = openravepy.RaveCreateModule(self.env, 'urdf')
+        rospack = rospkg.RosPack()
         with self.env:
-            name = module.SendCommand('load /home/peppe/python_test/sawyer.urdf /home/peppe/python_test/sawyer_base.srdf')
+            # name = module.SendCommand('load /home/peppe/python_test/sawyer.urdf /home/peppe/python_test/sawyer_base.srdf')
+            name = module.SendCommand(
+                'loadURI ' + rospack.get_path('fredsmp_utils') + '/robots/sawyer/sawyer.urdf'
+                + ' ' + rospack.get_path('fredsmp_utils') + '/robots/sawyer/sawyer.srdf')
             self.robot = self.env.GetRobot(name)
 
         time.sleep(0.5)
@@ -108,8 +118,8 @@ class SawyerPlanner:
         manip = self.robot.GetActiveManipulator()
         self.robot.SetActiveDOFs(manip.GetArmIndices())
 
-    def socket_handshake(self, *args):
-        self.socket_handler.send("\n")
+    # def socket_handshake(self, *args):
+    #     self.socket_handler.send("\n")
 
     def update(self):
 
@@ -235,7 +245,7 @@ class SawyerPlanner:
         self.robot.SetDOFLimits(lower[:7], upper[:7], self.robot.GetActiveManipulator().GetArmIndices())
 
 
-    def get_goal(self, msg, offset = 0.13):
+    def get_goal(self, msg, offset = 0.08):
 
         self.goal = numpy.array([msg.x, msg.y, msg.z])
         self.goal_off = self.goal - offset * self.normalize(self.goal - self.ee_position)
@@ -264,10 +274,11 @@ class SawyerPlanner:
             self.arm.move_to_joint_positions(cmd)
                            
         
-    def go_to_goal(self, goal = [None], to_goal = [None], offset = 0.13):
+    def go_to_goal(self, goal = [None], to_goal = [None], offset = 0.05):
 
         if goal[0] == None:
             goal = self.goal
+            print("goal: " + str(goal))
             goal_off = self.goal_off
         else:
             if to_goal[0] == None:
@@ -276,6 +287,7 @@ class SawyerPlanner:
                 goal_off = goal - offset * self.normalize(to_goal)
 
         while numpy.linalg.norm(goal_off - self.ee_position) > 0.01:
+            # print("goal_off: " + str(goal_off))
 
             des_vel_t = self.K_V * (goal_off - self.ee_position)
 
@@ -322,29 +334,38 @@ class SawyerPlanner:
 
         goal_off_camera = T_C[:3, 3]
         
-        message = "moveArm," + ",".join(map(str, goal_off_camera)) + "," + ",".join(map(str, [-0.5, 0.5, -0.5, 0.5])) + "\n"
+        plan_pose_msg = Pose()
+        plan_pose_msg.position.x = goal_off_camera[0]
+        plan_pose_msg.position.y = goal_off_camera[1]
+        plan_pose_msg.position.z = goal_off_camera[2]
+        plan_pose_msg.orientation.x = -0.5
+        plan_pose_msg.orientation.y = 0.5
+        plan_pose_msg.orientation.z = -0.5
+        plan_pose_msg.orientation.w = 0.5
+        resp = self.plan_pose_client(plan_pose_msg)
+        # message = "moveArm," + ",".join(map(str, goal_off_camera)) + "," + ",".join(map(str, [-0.5, 0.5, -0.5, 0.5])) + "\n"
         
-        resp = ""
-        while resp == "":
+        # resp = ""
+        # while resp == "":
     
-            self.socket_handler.send(message)
-            print("sent moveArm")
-            resp = self.socket_handler.recv(self.BUFFER_SIZE) # string -> 0 = success 1 = fail
+        #     self.socket_handler.send(message)
+        #     print("sent moveArm")
+        #     resp = self.socket_handler.recv(self.BUFFER_SIZE) # string -> 0 = success 1 = fail
 
-        message = "sendArm\n"
+        # message = "sendArm\n"
 
-        stopped = ""
-        while stopped == "":
-            self.socket_handler.send(message)
-            print("Sent SendArm")
-            stopped = self.socket_handler.recv(self.BUFFER_SIZE)   
+        # stopped = ""
+        # while stopped == "":
+        #     self.socket_handler.send(message)
+        #     print("Sent SendArm")
+        #     stopped = self.socket_handler.recv(self.BUFFER_SIZE)   
 
-        print("Starting moving")
+        # print("Starting moving")
 
         while numpy.linalg.norm(goal_off - self.ee_position) > 0.02:
             pass 
 
-        return resp
+        return resp.success
 
     def get_angular_velocity(self, goal = [None], to_goal = [None]):
         
@@ -435,7 +456,7 @@ class SawyerPlanner:
 
         # on shutdown
 
-        self.socket_handler.close()
+        # self.socket_handler.close()
 
         qstart_param_name = rospy.search_param('qstart')
 
