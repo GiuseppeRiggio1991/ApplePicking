@@ -28,7 +28,7 @@ bool GoalManager::appleCheck(sawyer_planner::AppleCheck::Request &req, sawyer_pl
     hydra_utils::CloudService cloud_srv;
     bool is_there = false;
     int tries = 0;
-    while (tries < 100 && is_there == false)
+    while (tries < 10 && is_there == false)
     {
         if (pcl_client_.call(cloud_srv))
         {
@@ -54,7 +54,7 @@ bool GoalManager::appleCheck(sawyer_planner::AppleCheck::Request &req, sawyer_pl
             }
 
         }
-
+        ros::Duration(0.1).sleep();
         tries++;
     }
 
