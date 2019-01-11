@@ -34,6 +34,7 @@ class SawyerPlanner:
 
         self.goal = [None]
         self.ee_position = None
+        self.starting_position_offset = 0.5
 
         rospy.Subscriber("/robot/limb/right/endpoint_state", EndpointState, self.get_robot_ee_position, queue_size = 1)
         rospy.wait_for_message("/robot/limb/right/endpoint_state", EndpointState)
@@ -262,7 +263,7 @@ class SawyerPlanner:
         self.goal = numpy.array([msg.x, msg.y, msg.z])
         self.goal_off = self.goal - offset * self.normalize(self.goal - self.ee_position)
 
-        self.starting_position = self.goal - numpy.array([0.4, 0.0, 0.0]);
+        self.starting_position = self.goal - numpy.array([self.starting_position_offset, 0.0, 0.0]);
         self.starting_direction = numpy.array([1.0, 0.0, 0.0])
         
 
