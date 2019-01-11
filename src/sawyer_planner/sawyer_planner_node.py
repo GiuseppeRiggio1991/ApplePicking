@@ -143,10 +143,12 @@ class SawyerPlanner:
 
             self.enable_bridge_pub.publish(Bool(True)) 
 
+            rospy.sleep(1.0)  # avoid exiting before subscriber updates new apple goal, 666 should replace with something more elegant
             if self.goal[0] == None:
                 rospy.logerr("There are no apples to pick!")
                 sys.exit()
-
+            print("starting position and direction: ")
+            print(self.starting_position, self.starting_direction)
             self.plan_to_goal(self.starting_position, self.starting_direction, 0.0)
 
             self.state = self.STATE.APPROACH
@@ -170,8 +172,10 @@ class SawyerPlanner:
             resp = self.apple_check_client.call(apple_check_srv)
 
             if resp.apple_is_there:
+                print("apple is there, going to grab")
                 self.go_to_goal()
                 self.state = self.STATE.GRAB
+                # self.state = self.STATE.TO_DROP
             else:
                 #rospy.logerr("There are no apples to pick!")
                 #sys.exit()
@@ -182,7 +186,7 @@ class SawyerPlanner:
 
             rospy.loginfo("GRAB")
 
-            self.grab()
+            # self.grab()
 
             #self.enable_bridge_pub.publish(Bool(False))
 
@@ -203,7 +207,7 @@ class SawyerPlanner:
             resp = self.apple_check_client.call(apple_check_srv)
 
             if resp.apple_is_there:
-                self.drop()
+                # self.drop()
                 self.go_to_goal()
                 self.state = self.STATE.GRAB
             else:
@@ -215,10 +219,18 @@ class SawyerPlanner:
             rospy.loginfo("TO_DROP")
 
             self.K_VQ = 0.5
+            # goal = deepcopy(self.goal)
+            # goal[0] -= 0.35
+            # # to_goal = numpy.dot( self.ee_orientation.rotation_matrix, numpy.array([0.0, 0.0, 1.0]) )
+            # print("starting position and direction: ")
+            # print(self.starting_position, self.starting_direction)
+            # self.go_to_goal(self.starting_position, self.starting_direction, 0.0)
+            # self.go_to_goal(goal)
 
-            self.go_to_place()
+            # self.go_to_place()
 
-            self.state = self.STATE.DROP
+            # self.state = self.STATE.DROP
+            self.state = self.STATE.TO_NEXT
 
         elif self.state == self.STATE.DROP:
 
@@ -308,7 +320,7 @@ class SawyerPlanner:
 
             self.arm.set_joint_velocities(cmd)
 
-    def plan_to_goal(self, goal = [None], to_goal = [None], offset = 0.13):
+    def plan_to_goal(self, goal = [None], to_goal = [None], offset = 0.13, ignore_trellis=False):
 
         if goal[0] == None:
             goal = self.goal
@@ -342,7 +354,7 @@ class SawyerPlanner:
         plan_pose_msg.orientation.y = 0.5
         plan_pose_msg.orientation.z = -0.5
         plan_pose_msg.orientation.w = 0.5
-        resp = self.plan_pose_client(plan_pose_msg)
+        resp = self.plan_pose_client(plan_pose_msg, ignore_trellis)
         # message = "moveArm," + ",".join(map(str, goal_off_camera)) + "," + ",".join(map(str, [-0.5, 0.5, -0.5, 0.5])) + "\n"
         
         # resp = ""
@@ -362,7 +374,7 @@ class SawyerPlanner:
 
         # print("Starting moving")
 
-        while numpy.linalg.norm(goal_off - self.ee_position) > 0.02:
+        while numpy.linalg.norm(goal_off - self.ee_position) > 0.04:
             pass 
 
         return resp.success

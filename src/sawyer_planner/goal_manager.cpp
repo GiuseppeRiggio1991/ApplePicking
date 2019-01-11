@@ -45,13 +45,15 @@ bool GoalManager::appleCheck(sawyer_planner::AppleCheck::Request &req, sawyer_pl
                 if (sqrt( pow(p.x - req.apple_pose.x, 2) + pow(p.y - req.apple_pose.y, 2) + pow(p.z - req.apple_pose.z, 2)) < distance)
                 {
                     distance = sqrt( pow(p.x - req.apple_pose.x, 2) + pow(p.y - req.apple_pose.y, 2) + pow(p.z - req.apple_pose.z, 2));
+
+                    if (distance < threshold){
+                        is_there = true;
+                        break;
+                    }
                 }
             }
 
         }
-
-        if (distance < threshold)
-            is_there = true;
 
         tries++;
     }
@@ -135,6 +137,7 @@ void GoalManager::updateGoal(const ros::TimerEvent& event)
         pcl::PointCloud<pcl::PointXYZRGBA> cloud;
         pcl::fromROSMsg(cloud_srv.response.cloud, cloud);
 
+        std::cout << "apples_.size(): " << apples_.size() << std::endl;
         if (apples_.size() == 0)
         {
             apples_.resize(cloud.size() * 3);
@@ -143,10 +146,10 @@ void GoalManager::updateGoal(const ros::TimerEvent& event)
             for (int i = 0; i < cloud.size(); i++)
             {
                 pcl::PointXYZRGBA& p = cloud.points[i];
-
-                apples_[i] = p.x;
-                apples_[i + 1] = p.y;
-                apples_[i + 2] = p.z;
+                std::cout << "raw points: " << p << std::endl;
+                apples_[i * 3] = p.x;
+                apples_[i * 3 + 1] = p.y;
+                apples_[i * 3 + 2] = p.z;
             }
 
             // create initial covariance matrix assuming diagonal matrix
@@ -181,6 +184,7 @@ void GoalManager::updateGoal(const ros::TimerEvent& event)
             {
 
                 pcl::PointXYZRGBA& p = cloud.points[i];
+                std::cout << "raw points: " << p << std::endl;
 
                 float distance = std::numeric_limits<double>::infinity();
 
@@ -210,6 +214,7 @@ void GoalManager::updateGoal(const ros::TimerEvent& event)
 
 
                     // there is a match
+                    std::cout << "apple matched" << std::endl;
                     observations.conservativeResize(observations.size()+3); //x, y, z of the new point
 
                     observations[observations.size()-3] = p.x;
@@ -224,6 +229,7 @@ void GoalManager::updateGoal(const ros::TimerEvent& event)
                 else
                 {
                     // no match, it is a new apple
+                    std::cout << "new apple" << std::endl;
                     new_apples.conservativeResize(new_apples.size()+3);
 
                     new_apples[new_apples.size()-3] = p.x;
@@ -247,7 +253,7 @@ void GoalManager::updateGoal(const ros::TimerEvent& event)
             apples_ = kf_.getState();
 
             // add the new apples to the state
-            
+            std::cout << "new_apples.size(): " << new_apples.size() << std::endl;
             apples_.conservativeResize(apples_.size() + new_apples.size());
             apples_.block(state_size_, 0, new_apples.size(), 1) = new_apples;
 
