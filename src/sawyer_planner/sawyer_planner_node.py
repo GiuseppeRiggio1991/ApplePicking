@@ -34,7 +34,7 @@ class SawyerPlanner:
 
         self.goal = [None]
         self.ee_position = None
-        self.starting_position_offset = 0.5
+        self.starting_position_offset = 0.4
 
         rospy.Subscriber("/robot/limb/right/endpoint_state", EndpointState, self.get_robot_ee_position, queue_size = 1)
         rospy.wait_for_message("/robot/limb/right/endpoint_state", EndpointState)
@@ -343,6 +343,7 @@ class SawyerPlanner:
         T_EE[:3, 3] = goal_off.transpose()
         T_EE[3, 3] = 1.0
 
+        # T_C = numpy.dot(T_EE, numpy.linalg.inv(self.T_G2EE))
         T_C = numpy.dot(T_EE, numpy.linalg.inv(self.T_EE2C))
 
         goal_off_camera = T_C[:3, 3]
@@ -356,6 +357,10 @@ class SawyerPlanner:
         plan_pose_msg.orientation.z = -0.5
         plan_pose_msg.orientation.w = 0.5
         resp = self.plan_pose_client(plan_pose_msg, ignore_trellis)
+
+        if not resp.success:
+            rospy.warn("planning to next target failed")
+        else:
         # message = "moveArm," + ",".join(map(str, goal_off_camera)) + "," + ",".join(map(str, [-0.5, 0.5, -0.5, 0.5])) + "\n"
         
         # resp = ""
@@ -375,8 +380,13 @@ class SawyerPlanner:
 
         # print("Starting moving")
 
-        while numpy.linalg.norm(goal_off - self.ee_position) > 0.04:
-            pass 
+            while numpy.linalg.norm(goal_off - self.ee_position) > 0.04:
+                print("waiting for arm to reach goal_off pose")
+                print("goal_off_camera: " + str(goal_off_camera))
+                print("goal_off: " + str(goal_off))
+                print("self.ee_position: " + str(self.ee_position))
+                rospy.sleep(0.1)
+                pass 
 
         return resp.success
 

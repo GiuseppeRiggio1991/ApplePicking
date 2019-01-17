@@ -22,7 +22,7 @@ GoalManager::~GoalManager()
 
 bool GoalManager::appleCheck(sawyer_planner::AppleCheck::Request &req, sawyer_planner::AppleCheck::Response &res)
 {
-    float threshold = 0.1; // change with some parameter
+    float threshold = 0.03; // change with some parameter
     float distance = std::numeric_limits<double>::infinity();
 
     hydra_utils::CloudService cloud_srv;
