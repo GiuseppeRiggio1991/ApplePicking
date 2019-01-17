@@ -78,7 +78,8 @@ class SawyerPlanner:
 
         self.K_V = 0.3
         self.K_VQ = 2.1
-        self.CONFIG_UP = numpy.array([0.0, 0.0, 0.0, 0.0, 0.0, -numpy.pi/2, 0.0])        
+        self.CONFIG_UP = numpy.array([0.0, 0.0, 0.0, 0.0, 0.0, -numpy.pi/2, 0.0])
+        self.MIN_MANIPULABILITY = 0.1
 
         #self.enable_bridge_pub.publish(Bool(False))
 
@@ -121,6 +122,24 @@ class SawyerPlanner:
 
     # def socket_handshake(self, *args):
     #     self.socket_handler.send("\n")
+
+    def computeManipulability(self):
+
+        current_joints_pos = self.arm.joint_angles()
+        current_joints_pos = current_joints_pos.values()
+
+        with self.robot:
+            self.robot.SetDOFValues(current_joints_pos[::-1], self.robot.GetActiveManipulator().GetArmIndices())
+            J_t = self.robot.GetActiveManipulator().CalculateJacobian()
+            J_r = self.robot.GetActiveManipulator().CalculateAngularVelocityJacobian()
+            J = numpy.concatenate((J_t, J_r), axis = 0)
+
+        u, s, v = numpy.linalg.svd(J, full_matrices = False) # here you can try to use just J_t instead of J
+
+        assert numpy.allclose(J, numpy.dot(u, numpy.dot(numpy.diag(s), v) ))
+
+        return numpy.prod(s)
+
 
     def update(self):
 
@@ -314,12 +333,23 @@ class SawyerPlanner:
             #print "goal: ", self.goal, " off: ", self.goal_off
             #print "des_vel: ", des_vel
 
-            joint_vel = self.compute_joint_vel(des_vel)
+            #singularity check
 
-            cmd = self.arm.joint_velocities()
-            cmd = dict(zip(cmd.keys(), joint_vel[::-1]))
+            if (self.computeManipulability() < self.MIN_MANIPULABILITY):
 
-            self.arm.set_joint_velocities(cmd)
+                # singularity detected, send zero velocity to the robot and exit
+                joint_vel = numpy.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+                cmd = dict(zip(cmd.keys(), joint_vel[::-1]))
+                self.arm.set_joint_velocities(cmd)
+                sys.exit()
+
+            else:
+
+                joint_vel = self.compute_joint_vel(des_vel)
+                cmd = self.arm.joint_velocities()
+                cmd = dict(zip(cmd.keys(), joint_vel[::-1]))
+                self.arm.set_joint_velocities(cmd)
+
 
     def plan_to_goal(self, goal = [None], to_goal = [None], offset = 0.13, ignore_trellis=False):
 
