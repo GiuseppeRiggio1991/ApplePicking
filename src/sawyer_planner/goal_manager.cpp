@@ -22,7 +22,7 @@ GoalManager::~GoalManager()
 
 bool GoalManager::appleCheck(sawyer_planner::AppleCheck::Request &req, sawyer_planner::AppleCheck::Response &res)
 {
-    float threshold = 0.06; // change with some parameter
+    float threshold = 0.0001; // change with some parameter
     float distance = std::numeric_limits<double>::infinity();
 
     hydra_utils::CloudService cloud_srv;
@@ -43,78 +43,78 @@ bool GoalManager::appleCheck(sawyer_planner::AppleCheck::Request &req, sawyer_pl
         }
     }
 
-    if (distance > threshold)
-    {
-        ROS_WARN("The requested apple was not in the state!");
-        res.apple_is_there = false;
-        return true;
-    }
-    else
-    {
-        distance = std::numeric_limits<double>::infinity();
+    // if (distance > threshold)
+    // {
+    //     ROS_WARN("The requested apple was not in the state!");
+    //     res.apple_is_there = false;
+    //     return true;
+    // }
+    // else
+    // {
+    //     distance = std::numeric_limits<double>::infinity();
 
-        while (tries < 10 && is_there == false)
-        {
-            if (pcl_client_.call(cloud_srv))
-            {
+    //     while (tries < 10 && is_there == false)
+    //     {
+    //         if (pcl_client_.call(cloud_srv))
+    //         {
 
-                pcl::fromROSMsg(cloud_srv.response.cloud, cloud);
+    //             pcl::fromROSMsg(cloud_srv.response.cloud, cloud);
     
-                for (int i = 0; i < cloud.size(); i++)
-                {
+    //             for (int i = 0; i < cloud.size(); i++)
+    //             {
     
-                    pcl::PointXYZRGBA& p = cloud.points[i];
+    //                 pcl::PointXYZRGBA& p = cloud.points[i];
     
-                    if (sqrt( pow(p.x - apples_[apple_index], 2) + pow(p.y - apples_[apple_index + 1], 2) + pow(p.z - apples_[apple_index + 2], 2)) < distance)
-                    {   
-                        distance = sqrt( pow(p.x - apples_[apple_index], 2) + pow(p.y - apples_[apple_index + 1], 2) + pow(p.z - apples_[apple_index + 2], 2));
-                        observed_index = i;
-                    }
-                }
+    //                 if (sqrt( pow(p.x - apples_[apple_index], 2) + pow(p.y - apples_[apple_index + 1], 2) + pow(p.z - apples_[apple_index + 2], 2)) < distance)
+    //                 {   
+    //                     distance = sqrt( pow(p.x - apples_[apple_index], 2) + pow(p.y - apples_[apple_index + 1], 2) + pow(p.z - apples_[apple_index + 2], 2));
+    //                     observed_index = i;
+    //                 }
+    //             }
     
-                if (distance < threshold)
-                {   
-                    is_there = true;
-                    break;
-                }
+    //             if (distance < threshold)
+    //             {   
+    //                 is_there = true;
+    //                 break;
+    //             }
     
-            }
-            ros::Duration(0.1).sleep();
-            tries++;
-        }
+    //         }
+    //         ros::Duration(0.1).sleep();
+    //         tries++;
+    //     }
 
-        if (is_there)
-        {
-            // check if there is another apple closer to the observed one (for close apples)
-            distance = std::numeric_limits<double>::infinity();
+    //     if (is_there)
+    //     {
+    //         // check if there is another apple closer to the observed one (for close apples)
+    //         distance = std::numeric_limits<double>::infinity();
 
-            pcl::PointXYZRGBA& p = cloud.points[observed_index];
+    //         pcl::PointXYZRGBA& p = cloud.points[observed_index];
 
-            for (int i = 0; i < apples_.size(); i += 3)
-            {
-                if (i != apple_index)
-                {
-                    if (sqrt( pow(req.apple_pose.x - apples_[i], 2) + pow(req.apple_pose.y - apples_[i+1], 2) + pow(req.apple_pose.z - apples_[i+2], 2)) < distance)
-                    {
-                        distance = sqrt( pow(req.apple_pose.x - apples_[i], 2) + pow(req.apple_pose.y - apples_[i+1], 2) + pow(req.apple_pose.z - apples_[i+2], 2));
-                    }
-                }
-            }
+    //         for (int i = 0; i < apples_.size(); i += 3)
+    //         {
+    //             if (i != apple_index)
+    //             {
+    //                 if (sqrt( pow(req.apple_pose.x - apples_[i], 2) + pow(req.apple_pose.y - apples_[i+1], 2) + pow(req.apple_pose.z - apples_[i+2], 2)) < distance)
+    //                 {
+    //                     distance = sqrt( pow(req.apple_pose.x - apples_[i], 2) + pow(req.apple_pose.y - apples_[i+1], 2) + pow(req.apple_pose.z - apples_[i+2], 2));
+    //                 }
+    //             }
+    //         }
         
-            if (sqrt( pow(p.x - apples_[apple_index], 2) + pow(p.y - apples_[apple_index + 1], 2) + pow(p.z - apples_[apple_index + 2], 2)) < distance)
-            {
-                res.apple_is_there = true;
-                return true;
-            }
-            else
-            {
-                // the observed apple is closer to another apple, so it should be that one instead of the requested one
-                res.apple_is_there = false;
-                return true;
-            }
-        }
-        else
-        {
+    //         if (sqrt( pow(p.x - apples_[apple_index], 2) + pow(p.y - apples_[apple_index + 1], 2) + pow(p.z - apples_[apple_index + 2], 2)) < distance)
+    //         {
+    //             res.apple_is_there = true;
+    //             return true;
+    //         }
+    //         else
+    //         {
+    //             // the observed apple is closer to another apple, so it should be that one instead of the requested one
+    //             res.apple_is_there = false;
+    //             return true;
+    //         }
+    //     }
+    //     else
+        // {
             Eigen::MatrixXf covariance = kf_.getCovariance();
 
             // remove from the state
@@ -152,8 +152,8 @@ bool GoalManager::appleCheck(sawyer_planner::AppleCheck::Request &req, sawyer_pl
 
             res.apple_is_there = false;
             return true;
-        }
-    }
+        // }
+    // }
 }
 
 void GoalManager::updateGoal(const ros::TimerEvent& event)
@@ -315,6 +315,8 @@ void GoalManager::updateGoal(const ros::TimerEvent& event)
         }
         std::cout << std::endl;*/
 
+    }else{
+        ROS_WARN("Failed to call cloud srv for apple positions");
     }
 
 

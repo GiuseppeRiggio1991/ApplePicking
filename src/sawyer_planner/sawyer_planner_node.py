@@ -62,10 +62,16 @@ class SawyerPlanner:
                     ])
 
         # transformation from the new camera frame (mounted on the gripper) and the EE
+        # self.T_G2EE = numpy.array([
+        #             [0.9961947, -0.0871557, 0.0, 0.0],
+        #             [0.0871557, 0.9961947, 0.0, -0.075],
+        #             [0.0, 0.0, 1.0, 0.12],
+        #             [0.0, 0.0, 0.0, 1.0]
+        #             ])
         self.T_G2EE = numpy.array([
                     [0.9961947, -0.0871557, 0.0, 0.0],
-                    [0.0871557, 0.9961947, 0.0, -0.075],
-                    [0.0, 0.0, 1.0, 0.12],
+                    [0.0871557, 0.9961947, 0.0, 0.075],
+                    [0.0, 0.0, 1.0, -0.12],
                     [0.0, 0.0, 0.0, 1.0]
                     ])
 
@@ -79,7 +85,7 @@ class SawyerPlanner:
         self.K_V = 0.3
         self.K_VQ = 2.1
         self.CONFIG_UP = numpy.array([0.0, 0.0, 0.0, 0.0, 0.0, -numpy.pi/2, 0.0])
-        self.MIN_MANIPULABILITY = 0.1
+        self.MIN_MANIPULABILITY = 0.03
 
         #self.enable_bridge_pub.publish(Bool(False))
 
@@ -161,7 +167,7 @@ class SawyerPlanner:
 
             rospy.loginfo("TO_NEXT")
 
-            self.enable_bridge_pub.publish(Bool(True)) 
+            # self.enable_bridge_pub.publish(Bool(True)) 
 
             rospy.sleep(1.0)  # avoid exiting before subscriber updates new apple goal, 666 should replace with something more elegant
             if self.goal[0] == None:
@@ -181,6 +187,8 @@ class SawyerPlanner:
 
             #while (self.goal[0] == None) and (time.time() - start < 20.0) :
             #    pass
+            self.enable_bridge_pub.publish(Bool(True)) 
+            rospy.sleep(1.0)
 
             self.K_VQ = 2.5
 
@@ -189,17 +197,20 @@ class SawyerPlanner:
             apple_check_srv.apple_pose.y = self.goal[1];
             apple_check_srv.apple_pose.z = self.goal[2];
 
-            resp = self.apple_check_client.call(apple_check_srv)
+            # resp = self.apple_check_client.call(apple_check_srv)
 
-            if resp.apple_is_there:
+            # if resp.apple_is_there:
+            if 1:
                 print("apple is there, going to grab")
                 self.go_to_goal()
                 self.state = self.STATE.GRAB
                 # self.state = self.STATE.TO_DROP
             else:
+                print("apple is NOT there, going to next apple")
                 #rospy.logerr("There are no apples to pick!")
                 #sys.exit()
                 self.goal[0] = None
+                print("self.goal: " + str(self.goal))
                 self.state = self.STATE.TO_NEXT
 
         elif self.state == self.STATE.GRAB:
@@ -226,17 +237,23 @@ class SawyerPlanner:
 
             resp = self.apple_check_client.call(apple_check_srv)
 
-            if resp.apple_is_there:
+            # if resp.apple_is_there:
+            if 0:
+                print("apple is still there, trying to grab again")
                 # self.drop()
                 self.go_to_goal()
                 self.state = self.STATE.GRAB
             else:
+                print("apple successfully picked, going to drop")
                 self.goal = [None]
                 self.state = self.STATE.TO_DROP
+                self.enable_bridge_pub.publish(Bool(False)) 
+                rospy.sleep(1.0)
 
         elif self.state == self.STATE.TO_DROP:
 
             rospy.loginfo("TO_DROP")
+
 
             self.K_VQ = 0.5
             # goal = deepcopy(self.goal)
@@ -335,10 +352,15 @@ class SawyerPlanner:
 
             #singularity check
 
-            if (self.computeManipulability() < self.MIN_MANIPULABILITY):
+            manipulability = self.computeManipulability()
+            if (manipulability < self.MIN_MANIPULABILITY):
+            # if 0:
 
+                rospy.loginfo("detected low manipulability, exiting: " + str(manipulability))
                 # singularity detected, send zero velocity to the robot and exit
+
                 joint_vel = numpy.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+                cmd = self.arm.joint_velocities()
                 cmd = dict(zip(cmd.keys(), joint_vel[::-1]))
                 self.arm.set_joint_velocities(cmd)
                 sys.exit()
@@ -389,7 +411,7 @@ class SawyerPlanner:
         resp = self.plan_pose_client(plan_pose_msg, ignore_trellis)
 
         if not resp.success:
-            rospy.warn("planning to next target failed")
+            rospy.logwarn("planning to next target failed")
         else:
         # message = "moveArm," + ",".join(map(str, goal_off_camera)) + "," + ",".join(map(str, [-0.5, 0.5, -0.5, 0.5])) + "\n"
         
