@@ -327,6 +327,7 @@ class SawyerPlanner:
 
         if goal[0] == None:
             goal = self.goal
+            self_goal = True
             print("goal: " + str(goal))
             goal_off = self.goal_off
         else:
@@ -337,6 +338,9 @@ class SawyerPlanner:
 
         while numpy.linalg.norm(goal_off - self.ee_position) > 0.01:
             # print("goal_off: " + str(goal_off))
+            if (self_goal):
+                goal = self.goal
+                goal_off = self.goal_off
 
             des_vel_t = self.K_V * (goal_off - self.ee_position)
 
