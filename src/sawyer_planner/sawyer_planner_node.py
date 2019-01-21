@@ -331,6 +331,7 @@ class SawyerPlanner:
             print("goal: " + str(goal))
             goal_off = self.goal_off
         else:
+            self_goal = False
             if to_goal[0] == None:
                 goal_off = goal - offset * self.normalize(goal - self.ee_position)
             else:

@@ -20,6 +20,49 @@ GoalManager::~GoalManager()
 {
 }
 
+bool GoalManager::removeApple(int apple_index){
+    Eigen::MatrixXf covariance = kf_.getCovariance();
+
+    // remove from the state
+    if (apples_.size() > 3)
+    {
+        if (apple_index < apples_.size() - 3)
+        {
+            apples_.segment(apple_index, apples_.size() - 3 - apple_index) = apples_.tail(apples_.size() - apple_index - 3);
+
+            // remove row
+            covariance.block(apple_index, 0, covariance.rows() - 3 - apple_index, covariance.cols()) = covariance.block(apple_index + 3, 0, covariance.rows() - apple_index - 3, covariance.cols());
+
+            // remove column
+            covariance.block(0, apple_index, covariance.rows(), covariance.cols() - 3 - apple_index) = covariance.block(0, apple_index + 3, covariance.rows(), covariance.cols() - apple_index - 3);
+
+            // reshape
+            apples_.conservativeResize(apples_.size() - 3);
+            covariance.conservativeResize(covariance.rows() - 3, covariance.cols() - 3);
+        }else{
+            ROS_WARN("tried to remove apple from the state that doesn't exist");
+            return false;
+        }
+    }
+    else
+    {
+        apples_.resize(0);
+        covariance.resize(0, 0);
+    }
+
+    state_size_ = apples_.size();
+    Eigen::MatrixXf A = Eigen::MatrixXf::Identity(state_size_, state_size_);
+    Eigen::MatrixXf C = A;
+    LinearModel model(A, C); // it doesn't really matter to update C
+    kf_.setModel(model);
+    kf_.setInitialStateAndCovariance(apples_, covariance);
+
+    ROS_INFO("Removed from the state");
+    return true;
+
+}
+
+
 bool GoalManager::appleCheck(sawyer_planner::AppleCheck::Request &req, sawyer_planner::AppleCheck::Response &res)
 {
     float threshold = 0.0001; // change with some parameter
@@ -115,41 +158,7 @@ bool GoalManager::appleCheck(sawyer_planner::AppleCheck::Request &req, sawyer_pl
     //     }
     //     else
         // {
-            Eigen::MatrixXf covariance = kf_.getCovariance();
-
-            // remove from the state
-            if (apples_.size() > 3)
-            {
-                if (apple_index < apples_.size() - 3)
-                {
-                    apples_.segment(apple_index, apples_.size() - 3 - apple_index) = apples_.tail(apples_.size() - apple_index - 3);
-
-                    // remove row
-                    covariance.block(apple_index, 0, covariance.rows() - 3 - apple_index, covariance.cols()) = covariance.block(apple_index + 3, 0, covariance.rows() - apple_index - 3, covariance.cols());
-
-                    // remove column
-                    covariance.block(0, apple_index, covariance.rows(), covariance.cols() - 3 - apple_index) = covariance.block(0, apple_index + 3, covariance.rows(), covariance.cols() - apple_index - 3);
-
-                    // reshape
-                    apples_.conservativeResize(apples_.size() - 3);
-                    covariance.conservativeResize(covariance.rows() - 3, covariance.cols() - 3);
-                }
-            }
-            else
-            {
-                apples_.resize(0);
-                covariance.resize(0, 0);
-            }
-
-            state_size_ = apples_.size();
-            Eigen::MatrixXf A = Eigen::MatrixXf::Identity(state_size_, state_size_);
-            Eigen::MatrixXf C = A;
-            LinearModel model(A, C); // it doesn't really matter to update C
-            kf_.setModel(model);
-            kf_.setInitialStateAndCovariance(apples_, covariance);
-
-            ROS_INFO("Removed from the state");
-
+            removeApple(apple_index);
             res.apple_is_there = false;
             return true;
         // }

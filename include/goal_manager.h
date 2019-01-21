@@ -15,6 +15,7 @@ class GoalManager
 
         void updateGoal(const ros::TimerEvent& event);
         bool appleCheck(sawyer_planner::AppleCheck::Request &req, sawyer_planner::AppleCheck::Response &res);
+        bool removeApple(int apple_index);
     private:
 
         // NodeHandle
