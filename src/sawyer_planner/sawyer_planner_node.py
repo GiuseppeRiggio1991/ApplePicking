@@ -12,46 +12,54 @@ from copy import *
 
 import rospy
 import rospkg
-from intera_core_msgs.msg import EndpointState, JointLimits
 from geometry_msgs.msg import Point
 from geometry_msgs.msg import Pose
+from geometry_msgs.msg import PoseArray
+from std_msgs.msg import Float32MultiArray
 from std_msgs.msg import Bool
 from std_srvs.srv import SetBool, Trigger
 from sawyer_planner.srv import AppleCheck, AppleCheckRequest, AppleCheckResponse
 from online_planner.srv import *
-
-import intera_interface
+from task_planner.srv import *
 
 import pyquaternion
 import socket
 
 class SawyerPlanner:
 
-    def __init__(self):
+    def __init__(self, sim=False):
 
         self.environment_setup()
         self.STATE = enum.Enum('STATE', 'SEARCH TO_NEXT APPROACH GRAB CHECK_GRASPING TO_DROP DROP')
 
         self.goal = [None]
+        self.goal_array = []
+        self.sequenced_goals = []
         self.ee_position = None
         self.starting_position_offset = 0.4
+        self.sim = sim
 
-        rospy.Subscriber("/robot/limb/right/endpoint_state", EndpointState, self.get_robot_ee_position, queue_size = 1)
-        rospy.wait_for_message("/robot/limb/right/endpoint_state", EndpointState)
         rospy.Subscriber("/sawyer_planner/goal", Point, self.get_goal, queue_size = 1)
-        rospy.Subscriber("/robot/joint_limits", JointLimits, self.get_joint_limits, queue_size = 1)
+        rospy.Subscriber("/sawyer_planner/goal_array", Float32MultiArray, self.get_goal_array, queue_size = 1)
         self.enable_bridge_pub = rospy.Publisher("/sawyer_planner/enable_bridge", Bool, queue_size = 1)
 
         self.gripper_client = rospy.ServiceProxy('/gripper_action', SetBool)
         self.apple_check_client = rospy.ServiceProxy("/sawyer_planner/apple_check", AppleCheck)
         self.start_pipeline_client = rospy.ServiceProxy("/sawyer_planner/start_pipeline", Trigger)
-        self.plan_pose_client = rospy.ServiceProxy("plan_pose_srv", PlanPose)
+        self.plan_pose_client = rospy.ServiceProxy("/plan_pose_srv", PlanPose)
+        self.sequencer_client = rospy.ServiceProxy("/sequence_tasks_srv", SequenceTasks)
 
         time.sleep(0.5)
         
         #self.enable_bridge_pub.publish(Bool(True))
 
-        self.arm = intera_interface.Limb("right")
+        if not self.sim:
+            from intera_core_msgs.msg import EndpointState, JointLimits
+            import intera_interface
+            rospy.Subscriber("/robot/limb/right/endpoint_state", EndpointState, self.get_robot_ee_position, queue_size = 1)
+            rospy.wait_for_message("/robot/limb/right/endpoint_state", EndpointState)
+            rospy.Subscriber("/robot/joint_limits", JointLimits, self.get_joint_limits, queue_size = 1)
+            self.arm = intera_interface.Limb("right")
 
         # trasform from the real sawyer EE to openrave camera frame 
         self.T_EE2C = numpy.array([
@@ -173,6 +181,11 @@ class SawyerPlanner:
             if self.goal[0] == None:
                 rospy.logerr("There are no apples to pick!")
                 sys.exit()
+
+            if self.sim:
+                self.sequence_goals()
+                sys.exit()
+                
             print("starting position and direction: ")
             print(self.starting_position, self.starting_direction)
             self.plan_to_goal(self.starting_position, self.starting_direction, 0.0)
@@ -280,6 +293,24 @@ class SawyerPlanner:
         else:
             pass
 
+    def sequence_goals(self):
+        goals = numpy.array(deepcopy(self.goal_array))
+        tasks_msg = PoseArray()
+        for goal in goals:
+            T = openravepy.transformLookat(goal + [0.1, 0.0, 0.0], goal - [0.5, 0.0, 0.0], [0, 0, -1])
+            pose = openravepy.poseFromMatrix(T)
+            pose_msg = Pose()
+            pose_msg.orientation.w = pose[0]
+            pose_msg.orientation.x = pose[1]
+            pose_msg.orientation.y = pose[2]
+            pose_msg.orientation.z = pose[3]
+            pose_msg.position.x = pose[4]
+            pose_msg.position.y = pose[5]
+            pose_msg.position.z = pose[6]
+            tasks_msg.poses.append(pose_msg)
+        resp = self.sequencer_client.call(tasks_msg)
+        self.sequenced_goals = [goals[i] for i in resp.sequence]
+        print self.sequenced_goals
 
     def get_robot_ee_position(self, msg):
 
@@ -293,6 +324,15 @@ class SawyerPlanner:
 
         self.robot.SetDOFLimits(lower[:7], upper[:7], self.robot.GetActiveManipulator().GetArmIndices())
 
+    def get_goal_array(self, msg):
+
+        goal_array = []
+        goal_array_1D = msg.data
+        if len(goal_array_1D):
+            goal_array_1D = list(msg.data)
+            for i in range(len(goal_array_1D) / 3):
+                goal_array.append(goal_array_1D[3 * i: 3 * i + 3])
+        self.goal_array = goal_array
 
     def get_goal(self, msg, offset = 0.08):
 

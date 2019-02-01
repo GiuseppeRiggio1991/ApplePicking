@@ -6,6 +6,7 @@ GoalManager::GoalManager()
 
     // Publishers
     goal_pub_ = nh_.advertise<geometry_msgs::Point>("/sawyer_planner/goal", 1);
+    goal_array_pub_ = nh_.advertise<std_msgs::Float32MultiArray>("/sawyer_planner/goal_array", 1);
 
     // Server
     apple_check_server_ = nh_.advertiseService("/sawyer_planner/apple_check", &GoalManager::appleCheck, this);
@@ -333,12 +334,19 @@ void GoalManager::updateGoal(const ros::TimerEvent& event)
 
     std::cout << "N: " << apples_.size() << std::endl;
 
+    apples_array_.clear();
     for (int i = 0; i < apples_.size(); i = i + 3)
     {
         std::cout << i << " " << apples_[i] << " " << apples_[i+1] << " " << apples_[i+2]
                            << " " << covariance_matrix(i, i) << " " << covariance_matrix(i+1, i+1) << " " << covariance_matrix(i+2, i+2)  << std::endl;
+        apples_array_.insert(apples_array_.end(), {apples_[i], apples_[i+1], apples_[i+2]});
     }
     std::cout << std::endl;
+
+    // publish apples array
+    std_msgs::Float32MultiArray apples_array_msg_;
+    apples_array_msg_.data = apples_array_;
+    goal_array_pub_.publish(apples_array_msg_);
 
 
 

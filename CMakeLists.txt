@@ -17,6 +17,8 @@ find_package(catkin REQUIRED COMPONENTS
   dynamixel_workbench_toolbox
   message_generation
   geometry_msgs
+  online_planner
+  task_planner
 )
 
 ## System dependencies are found with CMake's conventions

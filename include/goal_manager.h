@@ -1,10 +1,12 @@
 #include <ros/ros.h>
 #include <hydra_utils/CloudService.h>
 #include <geometry_msgs/Point.h>
+#include <std_msgs/Float32MultiArray.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/common/transforms.h>
 #include <sawyer_planner/AppleCheck.h>
 #include <kalman_filter.h>
+#include <vector>
 
 class GoalManager
 {
@@ -22,7 +24,7 @@ class GoalManager
         ros::NodeHandle nh_;
 
         // Publishers
-        ros::Publisher goal_pub_;
+        ros::Publisher goal_pub_, goal_array_pub_;
 
         // Servers
         ros::ServiceServer apple_check_server_;
@@ -39,4 +41,5 @@ class GoalManager
         Eigen::VectorXf apples_observations_;
 
         geometry_msgs::Point goal_;
+        std::vector<float> apples_array_;
 };

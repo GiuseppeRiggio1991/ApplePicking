@@ -3,17 +3,21 @@
 import rospy
 
 from sawyer_planner import sawyer_planner_node
-
+import sys
 
 if __name__ == "__main__":
 
     rospy.init_node('sawyer_planner')
     rate = rospy.Rate(1000)
-
-    planner = sawyer_planner_node.SawyerPlanner()
+    sim = False
+    if len(sys.argv) > 1:
+        if sys.argv[1] == 'sim':
+            sim = True
+    planner = sawyer_planner_node.SawyerPlanner(sim)
 
     while not rospy.is_shutdown():
-
+        # print(planner.goal_array)
+        # planner.sequence_goals()
         planner.update()
 
         rate.sleep()

@@ -58,12 +58,16 @@
   <build_export_depend>roscpp</build_export_depend>
   <build_export_depend>rospy</build_export_depend>
   <build_export_depend>std_msgs</build_export_depend>
+  <build_export_depend>online_planner</build_export_depend>
+  <build_export_depend>task_planner</build_export_depend>
   <exec_depend>roscpp</exec_depend>
   <exec_depend>rospy</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>std_srvs</exec_depend>
   <exec_depend>hydra_utils</exec_depend>
   <exec_depend>message_generation</exec_depend>
+  <exec_depend>online_planner</exec_depend>
+  <exec_depend>task_planner</exec_depend>
 
   <depend>dynamixel_workbench_msgs</depend>
   <depend>dynamixel_workbench_toolbox</depend>
