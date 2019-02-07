@@ -35,11 +35,14 @@ class SawyerPlanner:
         self.goal = [None]
         self.goal_array = []
         self.sequenced_goals = []
+        self.num_goals_history = 0  # length of sequenced goals
         self.ee_position = None
-        self.starting_position_offset = 0.4
+        self.starting_position_offset = 0.3
+        # self.go_to_goal_offset = [0.05, 0.0, 0.0]
+        self.go_to_goal_offset = 0.12
         self.sim = sim
 
-        rospy.Subscriber("/sawyer_planner/goal", Point, self.get_goal, queue_size = 1)
+        # rospy.Subscriber("/sawyer_planner/goal", Point, self.get_goal, queue_size = 1)
         rospy.Subscriber("/sawyer_planner/goal_array", Float32MultiArray, self.get_goal_array, queue_size = 1)
         self.enable_bridge_pub = rospy.Publisher("/sawyer_planner/enable_bridge", Bool, queue_size = 1)
 
@@ -176,6 +179,7 @@ class SawyerPlanner:
             rospy.loginfo("TO_NEXT")
 
             # self.enable_bridge_pub.publish(Bool(True)) 
+            self.sequence_goals()
 
             rospy.sleep(1.0)  # avoid exiting before subscriber updates new apple goal, 666 should replace with something more elegant
             if self.goal[0] == None:
@@ -183,7 +187,6 @@ class SawyerPlanner:
                 sys.exit()
 
             if self.sim:
-                self.sequence_goals()
                 sys.exit()
                 
             print("starting position and direction: ")
@@ -297,7 +300,7 @@ class SawyerPlanner:
         goals = numpy.array(deepcopy(self.goal_array))
         tasks_msg = PoseArray()
         for goal in goals:
-            T = openravepy.transformLookat(goal + [0.1, 0.0, 0.0], goal - [0.5, 0.0, 0.0], [0, 0, -1])
+            T = openravepy.transformLookat(goal + [0.1, 0.0, 0.0], goal - [self.starting_position_offset, 0.0, 0.0], [0, 0, -1])
             pose = openravepy.poseFromMatrix(T)
             pose_msg = Pose()
             pose_msg.orientation.w = pose[0]
@@ -310,6 +313,7 @@ class SawyerPlanner:
             tasks_msg.poses.append(pose_msg)
         resp = self.sequencer_client.call(tasks_msg)
         self.sequenced_goals = [goals[i] for i in resp.sequence]
+        self.num_goals_history = len(self.sequenced_goals)
         print self.sequenced_goals
 
     def get_robot_ee_position(self, msg):
@@ -333,6 +337,25 @@ class SawyerPlanner:
             for i in range(len(goal_array_1D) / 3):
                 goal_array.append(goal_array_1D[3 * i: 3 * i + 3])
         self.goal_array = goal_array
+
+        if len(self.sequenced_goals):
+            min_dist = numpy.inf
+            current_goal = self.sequenced_goals[0]
+            min_index = len(self.goal_array)
+            for it, goal in enumerate(self.goal_array):
+                dist = sum([(x - y)**2 for x, y in zip(goal, current_goal)])
+                if dist < min_dist:
+                    min_dist = dist
+                    min_index = it
+
+            if min_index != len(self.goal_array):
+                # offset = 0.08
+                self.goal = numpy.array(self.goal_array[min_index])
+                self.goal_off = self.goal - self.go_to_goal_offset * self.normalize(self.goal - self.ee_position)
+
+                self.starting_position = self.goal - numpy.array([self.starting_position_offset, 0.0, 0.0]);
+                self.starting_direction = numpy.array([1.0, 0.0, 0.0])
+
 
     def get_goal(self, msg, offset = 0.08):
 
@@ -382,6 +405,10 @@ class SawyerPlanner:
             if (self_goal):
                 goal = self.goal
                 goal_off = self.goal_off
+
+            if numpy.linalg.norm(self.ee_position - goal) < 0.2:
+                print("disabling updating of apple position because too close")
+                self.enable_bridge_pub.publish(Bool(False))
 
             des_vel_t = self.K_V * (goal_off - self.ee_position)
 
