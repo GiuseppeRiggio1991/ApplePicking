@@ -21,6 +21,7 @@ from std_srvs.srv import SetBool, Trigger
 from sawyer_planner.srv import AppleCheck, AppleCheckRequest, AppleCheckResponse
 from online_planner.srv import *
 from task_planner.srv import *
+# from task_planner.msgs import *
 
 import pyquaternion
 import socket
@@ -35,12 +36,15 @@ class SawyerPlanner:
         self.goal = [None]
         self.goal_array = []
         self.sequenced_goals = []
+        self.sequenced_trajectories = []
         self.num_goals_history = 0  # length of sequenced goals
         self.ee_position = None
         self.starting_position_offset = 0.3
         # self.go_to_goal_offset = [0.05, 0.0, 0.0]
         self.go_to_goal_offset = 0.12
         self.sim = sim
+        if self.sim:
+            self.starting_position_offset = 0.6
 
         # rospy.Subscriber("/sawyer_planner/goal", Point, self.get_goal, queue_size = 1)
         rospy.Subscriber("/sawyer_planner/goal_array", Float32MultiArray, self.get_goal_array, queue_size = 1)
@@ -49,7 +53,8 @@ class SawyerPlanner:
         self.gripper_client = rospy.ServiceProxy('/gripper_action', SetBool)
         self.apple_check_client = rospy.ServiceProxy("/sawyer_planner/apple_check", AppleCheck)
         self.start_pipeline_client = rospy.ServiceProxy("/sawyer_planner/start_pipeline", Trigger)
-        self.plan_pose_client = rospy.ServiceProxy("/plan_pose_srv", PlanPose)
+        # self.plan_pose_client = rospy.ServiceProxy("/plan_pose_srv", PlanPose)
+        self.optimise_trajectory_client = rospy.ServiceProxy("/optimise_trajectory_srv", OptimiseTrajectory)
         self.sequencer_client = rospy.ServiceProxy("/sequence_tasks_srv", SequenceTasks)
 
         time.sleep(0.5)
@@ -187,6 +192,7 @@ class SawyerPlanner:
                 sys.exit()
 
             if self.sim:
+                resp = self.optimise_trajectory_client(self.sequenced_trajectories[0])
                 sys.exit()
                 
             print("starting position and direction: ")
@@ -313,6 +319,7 @@ class SawyerPlanner:
             tasks_msg.poses.append(pose_msg)
         resp = self.sequencer_client.call(tasks_msg)
         self.sequenced_goals = [goals[i] for i in resp.sequence]
+        self.sequenced_trajectories = resp.database_trajectories
         self.num_goals_history = len(self.sequenced_goals)
         print self.sequenced_goals
 
@@ -480,7 +487,8 @@ class SawyerPlanner:
         plan_pose_msg.orientation.y = 0.5
         plan_pose_msg.orientation.z = -0.5
         plan_pose_msg.orientation.w = 0.5
-        resp = self.plan_pose_client(plan_pose_msg, ignore_trellis)
+        # resp = self.plan_pose_client(plan_pose_msg, ignore_trellis)
+        resp = self.optimise_trajectory_client(self.sequenced_trajectories[0])
 
         if not resp.success:
             rospy.logwarn("planning to next target failed")

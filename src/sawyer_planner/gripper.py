@@ -15,7 +15,8 @@ class Gripper:
 
         self.VELOCITY_DEFAULT = 4.0
         self.STATE = enum.Enum('STATE', 'OPEN CLOSED')
-        self.MAX_REVOLUTIONS = 16
+        self.MAX_REVOLUTIONS = 12
+        self.gripper_actuation_time = 5.0
 
         velocity_param_name = rospy.search_param('velocity')
 
@@ -38,6 +39,7 @@ class Gripper:
 
     def move_gripper(self, req):
 
+        print(req.data)
         if req.data:
             return self.open(), ""
         else:
@@ -71,7 +73,9 @@ class Gripper:
 
         called = False
 
-        while self.revolutions < self.MAX_REVOLUTIONS:
+        time_start = rospy.Time.now()
+        # while self.revolutions < self.MAX_REVOLUTIONS:
+        while (rospy.Time.now() - time_start).to_sec() < self.gripper_actuation_time:
             # print("debug 1")
             if (not called) and self.velocity_client(right_vel, left_vel):
                 # print("debug 2")
@@ -100,7 +104,9 @@ class Gripper:
 
         called = False
 
-        while self.revolutions < self.MAX_REVOLUTIONS:
+        time_start = rospy.Time.now()
+        # while self.revolutions < self.MAX_REVOLUTIONS:
+        while (rospy.Time.now() - time_start).to_sec() < self.gripper_actuation_time:
             print("debug 1")
             if (not called) and self.velocity_client(right_vel, left_vel):
                 print("debug 2")

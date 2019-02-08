@@ -116,7 +116,7 @@ catkin_python_setup()
 catkin_package(
   INCLUDE_DIRS include
 #  LIBRARIES sawyer_planner
-  CATKIN_DEPENDS roscpp rospy std_msgs std_srvs hydra_utils dynamixel_workbench_msgs dynamixel_workbench_toolbox
+  CATKIN_DEPENDS roscpp rospy std_msgs std_srvs online_planner hydra_utils dynamixel_workbench_msgs dynamixel_workbench_toolbox 
 #  DEPENDS system_lib
 )
 
