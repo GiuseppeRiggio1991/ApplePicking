@@ -27,7 +27,7 @@ bool GoalManager::removeApple(int apple_index){
     // remove from the state
     if (apples_.size() > 3)
     {
-        if (apple_index < apples_.size() - 3)
+        if (apple_index <= apples_.size() - 3)
         {
             apples_.segment(apple_index, apples_.size() - 3 - apple_index) = apples_.tail(apples_.size() - apple_index - 3);
 
@@ -84,6 +84,8 @@ bool GoalManager::appleCheck(sawyer_planner::AppleCheck::Request &req, sawyer_pl
         {
             distance = sqrt( pow(req.apple_pose.x - apples_[i], 2) + pow(req.apple_pose.y - apples_[i+1], 2) + pow(req.apple_pose.z - apples_[i+2], 2));
             apple_index = i;
+            ROS_WARN("apple index: %i", i);
+
         }
     }
 
