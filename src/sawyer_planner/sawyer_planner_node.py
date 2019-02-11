@@ -41,10 +41,13 @@ class SawyerPlanner:
         self.ee_position = None
         self.starting_position_offset = 0.3
         # self.go_to_goal_offset = [0.05, 0.0, 0.0]
-        self.go_to_goal_offset = 0.12
+        self.go_to_goal_offset = 0.12  # offset from apple centre to sawyer end effector frame (not gripper)
         self.sim = sim
+        self.limits_epsilon = 0.01
+        self.joint_limits_lower = numpy.array([-3.0503, -3.8095, -3.0426, -3.0439, -2.9761, -2.9761, -4.7124]) + self.limits_epsilon
+        self.joint_limits_upper = numpy.array([3.0503, 2.2736, 3.0426, 3.0439, 2.9761, 2.9761, 4.7124]) - self.limits_epsilon
         if self.sim:
-            self.starting_position_offset = 0.6
+            self.starting_position_offset = 0.35
 
         # rospy.Subscriber("/sawyer_planner/goal", Point, self.get_goal, queue_size = 1)
         rospy.Subscriber("/sawyer_planner/goal_array", Float32MultiArray, self.get_goal_array, queue_size = 1)
@@ -86,7 +89,7 @@ class SawyerPlanner:
         #             ])
         self.T_G2EE = numpy.array([
                     [0.9961947, -0.0871557, 0.0, 0.0],
-                    [0.0871557, 0.9961947, 0.0, 0.075],
+                    [0.0871557, 0.9961947, 0.0, 0.065],
                     [0.0, 0.0, 1.0, -0.12],
                     [0.0, 0.0, 0.0, 1.0]
                     ])
@@ -101,7 +104,7 @@ class SawyerPlanner:
         self.K_V = 0.3
         self.K_VQ = 2.1
         self.CONFIG_UP = numpy.array([0.0, 0.0, 0.0, 0.0, 0.0, -numpy.pi/2, 0.0])
-        self.MIN_MANIPULABILITY = 0.03
+        self.MIN_MANIPULABILITY = 0.025
 
         #self.enable_bridge_pub.publish(Bool(False))
 
@@ -213,9 +216,13 @@ class SawyerPlanner:
                 
             print("starting position and direction: ")
             print(self.starting_position, self.starting_direction)
-            self.plan_to_goal(self.starting_position, self.starting_direction, 0.0)
+            plan_success = self.plan_to_goal(self.starting_position, self.starting_direction, 0.0)
 
-            self.state = self.STATE.APPROACH
+            if plan_success:
+                self.state = self.STATE.APPROACH
+            else:
+                rospy.logerr('plan failed, exiting...')
+                sys.exit()
 
         elif self.state == self.STATE.APPROACH:
 
@@ -273,6 +280,7 @@ class SawyerPlanner:
             apple_check_srv.apple_pose.y = self.goal[1];
             apple_check_srv.apple_pose.z = self.goal[2];
 
+            rospy.loginfo('checking apple: ' + str(self.goal))
             resp = self.apple_check_client.call(apple_check_srv)
 
             # if resp.apple_is_there:
@@ -323,6 +331,7 @@ class SawyerPlanner:
         tasks_msg = PoseArray()
         for goal in goals:
             T = openravepy.transformLookat(goal + [0.1, 0.0, 0.0], goal - [self.starting_position_offset, 0.0, 0.0], [0, 0, -1])
+            T = numpy.dot(T, numpy.linalg.inv(self.T_G2EE))
             pose = openravepy.poseFromMatrix(T)
             pose_msg = Pose()
             pose_msg.orientation.w = pose[0]
@@ -430,8 +439,17 @@ class SawyerPlanner:
                 goal_off = self.goal_off
 
             if numpy.linalg.norm(self.ee_position - goal) < 0.2:
-                print("disabling updating of apple position because too close")
+                # print("disabling updating of apple position because too close")
                 self.enable_bridge_pub.publish(Bool(False))
+
+            # check if joints are outside the limits
+            joints = self.arm.joint_angles()
+            joints = joints.values()[::-1]  # need to reverse because method's ordering is j6-j0
+
+            if (joints <= self.joint_limits_lower).any() or (joints >= self.joint_limits_upper).any():
+                rospy.logerr('joints are about to go outside of limits, exiting...')
+                sys.exit()
+
 
             des_vel_t = self.K_V * (goal_off - self.ee_position)
 
@@ -491,8 +509,8 @@ class SawyerPlanner:
         T_EE[:3, 3] = goal_off.transpose()
         T_EE[3, 3] = 1.0
 
-        # T_C = numpy.dot(T_EE, numpy.linalg.inv(self.T_G2EE))
-        T_C = numpy.dot(T_EE, numpy.linalg.inv(self.T_EE2C))
+        T_C = numpy.dot(T_EE, numpy.linalg.inv(self.T_G2EE))
+        # T_C = numpy.dot(T_EE, numpy.linalg.inv(self.T_EE2C))
 
         goal_off_camera = T_C[:3, 3]
         
