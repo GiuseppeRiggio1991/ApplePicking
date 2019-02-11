@@ -162,6 +162,22 @@ class SawyerPlanner:
 
         return numpy.prod(s)
 
+    def computeReciprocalConditionNumber(self):
+
+        current_joints_pos = self.arm.joint_angles()
+        current_joints_pos = current_joints_pos.values()
+
+        with self.robot:
+            self.robot.SetDOFValues(current_joints_pos[::-1], self.robot.GetActiveManipulator().GetArmIndices())
+            J_t = self.robot.GetActiveManipulator().CalculateJacobian()
+            J_r = self.robot.GetActiveManipulator().CalculateAngularVelocityJacobian()
+            J = numpy.concatenate((J_t, J_r), axis = 0)
+
+        u, s, v = numpy.linalg.svd(J, full_matrices = False) # here you can try to use just J_t instead of J
+
+        assert numpy.allclose(J, numpy.dot(u, numpy.dot(numpy.diag(s), v) ))
+
+        return numpy.min(s)/numpy.max(s)
 
     def update(self):
 
@@ -330,10 +346,10 @@ class SawyerPlanner:
 
     def get_joint_limits(self, msg):
         
-        lower = numpy.array(msg.position_lower)
-        upper = numpy.array(msg.position_upper)
+        self.lower_limit = numpy.array(msg.position_lower)
+        self.upper_limit = numpy.array(msg.position_upper)
 
-        self.robot.SetDOFLimits(lower[:7], upper[:7], self.robot.GetActiveManipulator().GetArmIndices())
+        self.robot.SetDOFLimits(self.lower_limit[:7], self.upper_limit[:7], self.robot.GetActiveManipulator().GetArmIndices())
 
     def get_goal_array(self, msg):
 
@@ -431,7 +447,8 @@ class SawyerPlanner:
 
             #singularity check
 
-            manipulability = self.computeManipulability()
+            #manipulability = self.computeManipulability()
+            manipulability = self.computeReciprocalConditionNumber()
             if (manipulability < self.MIN_MANIPULABILITY):
             # if 0:
 
@@ -565,7 +582,16 @@ class SawyerPlanner:
             J_r = self.robot.GetActiveManipulator().CalculateAngularVelocityJacobian()
             J = numpy.concatenate((J_t, J_r), axis = 0)
 
-        return numpy.dot( numpy.linalg.pinv(J), des_vel)
+        # add joint limit repulsive potential
+        mid_joint_limit = (self.lower_limit + self.upper_limit) / 2.0
+        q_dot = numpy.zeros((7, 1))
+
+        K = 0.1
+
+        for i in range(7):
+            q_dot[i] = - K * (joints[i] - mid_joint_limit[i]) / (self.upper_limit[i] - self.lower_limit[i]) 
+
+        return numpy.dot( numpy.linalg.pinv(J), des_vel) + q_dot
 
     def grab(self):
 
