@@ -15,6 +15,9 @@ import rospkg
 from geometry_msgs.msg import Point
 from geometry_msgs.msg import Pose
 from geometry_msgs.msg import PoseArray
+from geometry_msgs.msg import PoseStamped
+from sensor_msgs.msg import JointState
+from trajectory_msgs.msg import JointTrajectoryPoint
 from std_msgs.msg import Float32MultiArray
 from std_msgs.msg import Bool
 from std_srvs.srv import SetBool, Trigger
@@ -37,40 +40,17 @@ class SawyerPlanner:
         self.goal_array = []
         self.sequenced_goals = []
         self.sequenced_trajectories = []
+        self.manipulator_joints = []
         self.num_goals_history = 0  # length of sequenced goals
         self.ee_position = None
         self.starting_position_offset = 0.3
+        self.apple_offset = [0.0, 0.0, 0.0]
         # self.go_to_goal_offset = [0.05, 0.0, 0.0]
         self.go_to_goal_offset = 0.12  # offset from apple centre to sawyer end effector frame (not gripper)
         self.sim = sim
         self.limits_epsilon = 0.01
         self.joint_limits_lower = numpy.array([-3.0503, -3.8095, -3.0426, -3.0439, -2.9761, -2.9761, -4.7124]) + self.limits_epsilon
         self.joint_limits_upper = numpy.array([3.0503, 2.2736, 3.0426, 3.0439, 2.9761, 2.9761, 4.7124]) - self.limits_epsilon
-        if self.sim:
-            self.starting_position_offset = 0.35
-
-        # rospy.Subscriber("/sawyer_planner/goal", Point, self.get_goal, queue_size = 1)
-        rospy.Subscriber("/sawyer_planner/goal_array", Float32MultiArray, self.get_goal_array, queue_size = 1)
-        self.enable_bridge_pub = rospy.Publisher("/sawyer_planner/enable_bridge", Bool, queue_size = 1)
-
-        self.gripper_client = rospy.ServiceProxy('/gripper_action', SetBool)
-        self.apple_check_client = rospy.ServiceProxy("/sawyer_planner/apple_check", AppleCheck)
-        self.start_pipeline_client = rospy.ServiceProxy("/sawyer_planner/start_pipeline", Trigger)
-        # self.plan_pose_client = rospy.ServiceProxy("/plan_pose_srv", PlanPose)
-        self.optimise_trajectory_client = rospy.ServiceProxy("/optimise_trajectory_srv", OptimiseTrajectory)
-        self.sequencer_client = rospy.ServiceProxy("/sequence_tasks_srv", SequenceTasks)
-
-        time.sleep(0.5)
-        
-        #self.enable_bridge_pub.publish(Bool(True))
-
-        if not self.sim:
-            from intera_core_msgs.msg import EndpointState, JointLimits
-            import intera_interface
-            rospy.Subscriber("/robot/limb/right/endpoint_state", EndpointState, self.get_robot_ee_position, queue_size = 1)
-            rospy.wait_for_message("/robot/limb/right/endpoint_state", EndpointState)
-            rospy.Subscriber("/robot/joint_limits", JointLimits, self.get_joint_limits, queue_size = 1)
-            self.arm = intera_interface.Limb("right")
 
         # trasform from the real sawyer EE to openrave camera frame 
         self.T_EE2C = numpy.array([
@@ -89,7 +69,7 @@ class SawyerPlanner:
         #             ])
         self.T_G2EE = numpy.array([
                     [0.9961947, -0.0871557, 0.0, 0.0],
-                    [0.0871557, 0.9961947, 0.0, 0.065],
+                    [0.0871557, 0.9961947, 0.0, 0.075],
                     [0.0, 0.0, 1.0, -0.12],
                     [0.0, 0.0, 0.0, 1.0]
                     ])
@@ -100,6 +80,37 @@ class SawyerPlanner:
         #            [0.0, 0.0, 1.0, 0.14],
         #            [0.0, 0.0, 0.0, 1.0]
         #            ])
+        # self.robot.SetDOFLimits(self.joint_limits_lower, self.joint_limits_upper, self.robot.GetActiveManipulator().GetArmIndices())
+        if self.sim:
+            self.apple_offset = [0.5, 0.0, 0.0]
+
+        # rospy.Subscriber("/sawyer_planner/goal", Point, self.get_goal, queue_size = 1)
+        rospy.Subscriber("/sawyer_planner/goal_array", Float32MultiArray, self.get_goal_array, queue_size = 1)
+        self.enable_bridge_pub = rospy.Publisher("/sawyer_planner/enable_bridge", Bool, queue_size = 1)
+        self.sim_joint_velocities_pub = rospy.Publisher('sim_joint_velocities', JointTrajectoryPoint, queue_size=1)
+
+        self.gripper_client = rospy.ServiceProxy('/gripper_action', SetBool)
+        self.apple_check_client = rospy.ServiceProxy("/sawyer_planner/apple_check", AppleCheck)
+        self.start_pipeline_client = rospy.ServiceProxy("/sawyer_planner/start_pipeline", Trigger)
+        # self.plan_pose_client = rospy.ServiceProxy("/plan_pose_srv", PlanPose)
+        self.optimise_trajectory_client = rospy.ServiceProxy("/optimise_trajectory_srv", OptimiseTrajectory)
+        self.sequencer_client = rospy.ServiceProxy("/sequence_tasks_srv", SequenceTasks)
+
+        time.sleep(0.5)
+        
+        #self.enable_bridge_pub.publish(Bool(True))
+
+        if not self.sim:
+            # from intera_core_msgs.msg import EndpointState, JointLimits
+            import intera_interface
+            # rospy.Subscriber("/robot/limb/right/endpoint_state", EndpointState, self.get_robot_ee_position, queue_size = 1)
+            # rospy.wait_for_message("/robot/limb/right/endpoint_state", EndpointState)
+            # rospy.Subscriber("/robot/joint_limits", JointLimits, self.get_joint_limits, queue_size = 1)
+            self.arm = intera_interface.Limb("right")
+
+        rospy.Subscriber('manipulator_pose', PoseStamped, self.get_robot_ee_position, queue_size = 1)
+        rospy.Subscriber('manipulator_joints', JointState, self.get_robot_joints, queue_size = 1)
+        rospy.wait_for_message('manipulator_pose', PoseStamped)
 
         self.K_V = 0.3
         self.K_VQ = 2.1
@@ -150,11 +161,13 @@ class SawyerPlanner:
 
     def computeManipulability(self):
 
-        current_joints_pos = self.arm.joint_angles()
-        current_joints_pos = current_joints_pos.values()
+        # current_joints_pos = self.arm.joint_angles()
+        # current_joints_pos = current_joints_pos.values()
+        current_joints_pos = copy(self.manipulator_joints)
 
         with self.robot:
-            self.robot.SetDOFValues(current_joints_pos[::-1], self.robot.GetActiveManipulator().GetArmIndices())
+            # self.robot.SetDOFValues(current_joints_pos[::-1], self.robot.GetActiveManipulator().GetArmIndices())
+            self.robot.SetDOFValues(current_joints_pos, self.robot.GetActiveManipulator().GetArmIndices())
             J_t = self.robot.GetActiveManipulator().CalculateJacobian()
             J_r = self.robot.GetActiveManipulator().CalculateAngularVelocityJacobian()
             J = numpy.concatenate((J_t, J_r), axis = 0)
@@ -167,11 +180,13 @@ class SawyerPlanner:
 
     def computeReciprocalConditionNumber(self):
 
-        current_joints_pos = self.arm.joint_angles()
-        current_joints_pos = current_joints_pos.values()
+        # current_joints_pos = self.arm.joint_angles()
+        # current_joints_pos = current_joints_pos.values()
+        current_joints_pos = copy(self.manipulator_joints)
 
         with self.robot:
-            self.robot.SetDOFValues(current_joints_pos[::-1], self.robot.GetActiveManipulator().GetArmIndices())
+            # self.robot.SetDOFValues(current_joints_pos[::-1], self.robot.GetActiveManipulator().GetArmIndices())
+            self.robot.SetDOFValues(current_joints_pos, self.robot.GetActiveManipulator().GetArmIndices())
             J_t = self.robot.GetActiveManipulator().CalculateJacobian()
             J_r = self.robot.GetActiveManipulator().CalculateAngularVelocityJacobian()
             J = numpy.concatenate((J_t, J_r), axis = 0)
@@ -210,9 +225,9 @@ class SawyerPlanner:
                 rospy.logerr("There are no apples to pick!")
                 sys.exit()
 
-            if self.sim:
-                resp = self.optimise_trajectory_client(self.sequenced_trajectories[0])
-                sys.exit()
+            # if self.sim:
+            #     resp = self.optimise_trajectory_client(self.sequenced_trajectories[0])
+            #     sys.exit()
                 
             print("starting position and direction: ")
             print(self.starting_position, self.starting_direction)
@@ -232,7 +247,8 @@ class SawyerPlanner:
 
             #while (self.goal[0] == None) and (time.time() - start < 20.0) :
             #    pass
-            self.enable_bridge_pub.publish(Bool(True)) 
+            if not self.sim:
+                self.enable_bridge_pub.publish(Bool(True)) 
             rospy.sleep(1.0)
 
             self.K_VQ = 2.5
@@ -293,7 +309,8 @@ class SawyerPlanner:
                 print("apple successfully picked, going to drop")
                 self.goal = [None]
                 self.state = self.STATE.TO_DROP
-                self.enable_bridge_pub.publish(Bool(False)) 
+                if not self.sim:
+                    self.enable_bridge_pub.publish(Bool(False)) 
                 rospy.sleep(1.0)
 
         elif self.state == self.STATE.TO_DROP:
@@ -350,15 +367,31 @@ class SawyerPlanner:
 
     def get_robot_ee_position(self, msg):
 
-        self.ee_orientation = pyquaternion.Quaternion(msg.pose.orientation.w, msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z)
-        self.ee_position = numpy.array([msg.pose.position.x, msg.pose.position.y, msg.pose.position.z])
+        # ee_orientation = pyquaternion.Quaternion(msg.pose.orientation.w, msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z)
+        # ee_position = numpy.array([msg.pose.position.x, msg.pose.position.y, msg.pose.position.z])
 
-    def get_joint_limits(self, msg):
+        pose = [msg.pose.orientation.w,
+                msg.pose.orientation.x,
+                msg.pose.orientation.y,
+                msg.pose.orientation.z,
+                msg.pose.position.x,
+                msg.pose.position.y,
+                msg.pose.position.z]
+        pose = openravepy.matrixFromPose(pose)
+        ee_pose = numpy.dot(pose, self.T_G2EE)
+        ee_pose = openravepy.poseFromMatrix(ee_pose)
+        self.ee_orientation = pyquaternion.Quaternion(ee_pose[:4])
+        self.ee_position = numpy.array(ee_pose[4:])
+
+    # def get_joint_limits(self, msg):
         
-        self.lower_limit = numpy.array(msg.position_lower)
-        self.upper_limit = numpy.array(msg.position_upper)
+        # self.lower_limit = numpy.array(msg.position_lower)
+        # self.upper_limit = numpy.array(msg.position_upper)
 
-        self.robot.SetDOFLimits(self.lower_limit[:7], self.upper_limit[:7], self.robot.GetActiveManipulator().GetArmIndices())
+        # self.robot.SetDOFLimits(self.joint_limits_lower, self.joint_limits_upper, self.robot.GetActiveManipulator().GetArmIndices())
+
+    def get_robot_joints(self, msg):
+        self.manipulator_joints = numpy.array(msg.position)
 
     def get_goal_array(self, msg):
 
@@ -367,7 +400,7 @@ class SawyerPlanner:
         if len(goal_array_1D):
             goal_array_1D = list(msg.data)
             for i in range(len(goal_array_1D) / 3):
-                goal_array.append(goal_array_1D[3 * i: 3 * i + 3])
+                goal_array.append(numpy.array(goal_array_1D[3 * i: 3 * i + 3]) - self.apple_offset)
         self.goal_array = goal_array
 
         if len(self.sequenced_goals):
@@ -388,6 +421,8 @@ class SawyerPlanner:
                 self.starting_position = self.goal - numpy.array([self.starting_position_offset, 0.0, 0.0]);
                 self.starting_direction = numpy.array([1.0, 0.0, 0.0])
 
+        if self.sim:
+            self.enable_bridge_pub.publish(Bool(False))
 
     def get_goal(self, msg, offset = 0.08):
 
@@ -398,24 +433,24 @@ class SawyerPlanner:
         self.starting_direction = numpy.array([1.0, 0.0, 0.0])
         
 
-    def go_to_start(self):
+    # def go_to_start(self):
         
-        joints = self.arm.joint_angles()
+    #     joints = self.arm.joint_angles()
 
-        if ( numpy.linalg.norm(joints.values() - self.qstart ) < 4.0 ):
-            cmd = dict(zip(joints.keys(), self.qstart))
-            self.arm.move_to_joint_positions(cmd)
-        else:
-            # if too far, go up first
-            rospy.logwarn("The starting position is too far, I'm going up first!")
+    #     if ( numpy.linalg.norm(joints.values() - self.qstart ) < 4.0 ):
+    #         cmd = dict(zip(joints.keys(), self.qstart))
+    #         self.arm.move_to_joint_positions(cmd)
+    #     else:
+    #         # if too far, go up first
+    #         rospy.logwarn("The starting position is too far, I'm going up first!")
             
-            cmd = dict(zip(joints.keys(), self.CONFIG_UP))
-            self.arm.move_to_joint_positions(cmd)
+    #         cmd = dict(zip(joints.keys(), self.CONFIG_UP))
+    #         self.arm.move_to_joint_positions(cmd)
             
-            time.sleep(1)
+    #         time.sleep(1)
             
-            cmd = dict(zip(joints.keys(), self.qstart))
-            self.arm.move_to_joint_positions(cmd)
+    #         cmd = dict(zip(joints.keys(), self.qstart))
+    #         self.arm.move_to_joint_positions(cmd)
                            
         
     def go_to_goal(self, goal = [None], to_goal = [None], offset = 0.05):
@@ -433,21 +468,28 @@ class SawyerPlanner:
                 goal_off = goal - offset * self.normalize(to_goal)
 
         while numpy.linalg.norm(goal_off - self.ee_position) > 0.01:
-            # print("goal_off: " + str(goal_off))
+            print("goal_off: " + str(goal_off))
+            print("ee_position: " + str(self.ee_position))
             if (self_goal):
                 goal = self.goal
                 goal_off = self.goal_off
 
             if numpy.linalg.norm(self.ee_position - goal) < 0.2:
                 # print("disabling updating of apple position because too close")
-                self.enable_bridge_pub.publish(Bool(False))
+                if not self.sim:
+                    self.enable_bridge_pub.publish(Bool(False))
 
             # check if joints are outside the limits
-            joints = self.arm.joint_angles()
-            joints = joints.values()[::-1]  # need to reverse because method's ordering is j6-j0
+            # joints = self.arm.joint_angles()
+            # joints = joints.values()[::-1]  # need to reverse because method's ordering is j6-j0
+            joints = copy(self.manipulator_joints)
 
             if (joints <= self.joint_limits_lower).any() or (joints >= self.joint_limits_upper).any():
                 rospy.logerr('joints are about to go outside of limits, exiting...')
+                if self.sim:
+                    msg = JointTrajectoryPoint()
+                    msg.velocities = numpy.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+                    self.sim_joint_velocities_pub.publish(msg)
                 sys.exit()
 
 
@@ -474,17 +516,28 @@ class SawyerPlanner:
                 # singularity detected, send zero velocity to the robot and exit
 
                 joint_vel = numpy.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-                cmd = self.arm.joint_velocities()
-                cmd = dict(zip(cmd.keys(), joint_vel[::-1]))
-                self.arm.set_joint_velocities(cmd)
+                if self.sim:
+                    msg = JointTrajectoryPoint()
+                    msg.velocities = joint_vel
+                    self.sim_joint_velocities_pub.publish(msg)
+                else:
+                    cmd = self.arm.joint_velocities()
+                    cmd = dict(zip(cmd.keys(), joint_vel[::-1]))
+                    self.arm.set_joint_velocities(cmd)
                 sys.exit()
 
             else:
 
                 joint_vel = self.compute_joint_vel(des_vel)
-                cmd = self.arm.joint_velocities()
-                cmd = dict(zip(cmd.keys(), joint_vel[::-1]))
-                self.arm.set_joint_velocities(cmd)
+                # print("joint_vel: " + str(joint_vel))
+                if self.sim:
+                    msg = JointTrajectoryPoint()
+                    msg.velocities = joint_vel
+                    self.sim_joint_velocities_pub.publish(msg)
+                else:
+                    cmd = self.arm.joint_velocities()
+                    cmd = dict(zip(cmd.keys(), joint_vel[::-1]))
+                    self.arm.set_joint_velocities(cmd)
 
 
     def plan_to_goal(self, goal = [None], to_goal = [None], offset = 0.13, ignore_trellis=False):
@@ -591,25 +644,31 @@ class SawyerPlanner:
 
     def compute_joint_vel(self, des_vel):
 
-        joints = self.arm.joint_angles()
-        joints = joints.values()
+        # joints = self.arm.joint_angles()
+        # joints = joints.values()
+        joints = copy(self.manipulator_joints)
 
         with self.robot:
-            self.robot.SetDOFValues(joints[::-1], self.robot.GetActiveManipulator().GetArmIndices())
+            # self.robot.SetDOFValues(joints[::-1], self.robot.GetActiveManipulator().GetArmIndices())
+            self.robot.SetDOFValues(joints, self.robot.GetActiveManipulator().GetArmIndices())
             J_t = self.robot.GetActiveManipulator().CalculateJacobian()
             J_r = self.robot.GetActiveManipulator().CalculateAngularVelocityJacobian()
             J = numpy.concatenate((J_t, J_r), axis = 0)
 
         # add joint limit repulsive potential
-        mid_joint_limit = (self.lower_limit + self.upper_limit) / 2.0
+        mid_joint_limit = (self.joint_limits_lower + self.joint_limits_upper) / 2.0
         q_dot = numpy.zeros((7, 1))
 
-        K = 0.1
+        K = 0.05
 
         for i in range(7):
-            q_dot[i] = - K * (joints[i] - mid_joint_limit[i]) / (self.upper_limit[i] - self.lower_limit[i]) 
+            q_dot[i] = - K * (joints[i] - mid_joint_limit[i]) / (self.joint_limits_upper[i] - self.joint_limits_lower[i]) 
 
-        return numpy.dot( numpy.linalg.pinv(J), des_vel) + q_dot
+        # print(numpy.linalg.pinv(J).shape)
+        # print(des_vel.shape)
+        # print(q_dot.shape)
+        # return numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1)) + q_dot
+        return numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1))
 
     def grab(self):
 
