@@ -667,8 +667,8 @@ class SawyerPlanner:
         # print(numpy.linalg.pinv(J).shape)
         # print(des_vel.shape)
         # print(q_dot.shape)
-        # return numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1)) + q_dot
-        return numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1))
+        return numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1)) + numpy.dot( (numpy.eye(7) - numpy.dot( numpy.linalg.pinv(J) , J )), q_dot)
+        #return numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1))
 
     def grab(self):
 
