@@ -49,8 +49,15 @@ class SawyerPlanner:
         self.go_to_goal_offset = 0.12  # offset from apple centre to sawyer end effector frame (not gripper)
         self.sim = sim
         self.limits_epsilon = 0.01
+        self.K_V = 0.3
+        self.K_VQ = 2.1
+        self.CONFIG_UP = numpy.array([0.0, 0.0, 0.0, 0.0, 0.0, -numpy.pi/2, 0.0])
+        self.MIN_MANIPULABILITY = 0.025
+
         self.joint_limits_lower = numpy.array([-3.0503, -3.8095, -3.0426, -3.0439, -2.9761, -2.9761, -4.7124]) + self.limits_epsilon
         self.joint_limits_upper = numpy.array([3.0503, 2.2736, 3.0426, 3.0439, 2.9761, 2.9761, 4.7124]) - self.limits_epsilon
+
+        self.joint_names = ['right_j0', 'right_j1', 'right_j2', 'right_j3', 'right_j4', 'right_j5', 'right_j6']
 
         # trasform from the real sawyer EE to openrave camera frame 
         self.T_EE2C = numpy.array([
@@ -100,6 +107,11 @@ class SawyerPlanner:
         
         #self.enable_bridge_pub.publish(Bool(True))
 
+        rospy.Subscriber('manipulator_pose', PoseStamped, self.get_robot_ee_position, queue_size = 1)
+        rospy.Subscriber('manipulator_joints', JointState, self.get_robot_joints, queue_size = 1)
+        or_joint_states = rospy.wait_for_message('manipulator_joints', JointState)
+        or_joints_pos = numpy.array(or_joint_states.position)
+
         if not self.sim:
             # from intera_core_msgs.msg import EndpointState, JointLimits
             import intera_interface
@@ -107,15 +119,13 @@ class SawyerPlanner:
             # rospy.wait_for_message("/robot/limb/right/endpoint_state", EndpointState)
             # rospy.Subscriber("/robot/joint_limits", JointLimits, self.get_joint_limits, queue_size = 1)
             self.arm = intera_interface.Limb("right")
-
-        rospy.Subscriber('manipulator_pose', PoseStamped, self.get_robot_ee_position, queue_size = 1)
-        rospy.Subscriber('manipulator_joints', JointState, self.get_robot_joints, queue_size = 1)
-        rospy.wait_for_message('manipulator_pose', PoseStamped)
-
-        self.K_V = 0.3
-        self.K_VQ = 2.1
-        self.CONFIG_UP = numpy.array([0.0, 0.0, 0.0, 0.0, 0.0, -numpy.pi/2, 0.0])
-        self.MIN_MANIPULABILITY = 0.025
+            current_joints_pos = self.arm.joint_angles()
+            current_joints_pos = numpy.array(current_joints_pos.values()[::-1])
+            # joint_states = rospy.wait_for_message("/robot/joint_states", JointState)
+            # joints_pos = numpy.array(joint_states.position)
+            if numpy.linalg.norm(or_joints_pos - current_joints_pos) > 0.1:
+                rospy.logerr("it seems like you should be running the node in sim mode, exiting.")
+                sys.exit()
 
         #self.enable_bridge_pub.publish(Bool(False))
 
