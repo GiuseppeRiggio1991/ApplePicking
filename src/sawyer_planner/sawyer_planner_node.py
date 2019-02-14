@@ -115,7 +115,7 @@ class SawyerPlanner:
             # self.goal_array = [[0.8, 0.3, 0.5], [0.8, -0.3, 0.5]]
             # self.goal_array = [[0.8, 0.3, 0.5]]  # bad run low manip
             # self.goal_array = [[0.8, 0.1, 0.5]]  # semi okay run
-            self.goal_array = [[0.8, 0.3, 0.2]]  # semi okay run
+            self.goal_array = [[0.8, 0.3, 0.2]]  # bad run joint limits
             # self.goal_array = [[0.7, -0.3, 0.8]]  # good one
         # if not self.sim:
         else:
