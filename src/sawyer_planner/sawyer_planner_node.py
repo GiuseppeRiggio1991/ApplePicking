@@ -88,8 +88,6 @@ class SawyerPlanner:
         #            [0.0, 0.0, 0.0, 1.0]
         #            ])
         # self.robot.SetDOFLimits(self.joint_limits_lower, self.joint_limits_upper, self.robot.GetActiveManipulator().GetArmIndices())
-        if self.sim:
-            self.apple_offset = [0.5, 0.0, 0.0]
 
         # rospy.Subscriber("/sawyer_planner/goal", Point, self.get_goal, queue_size = 1)
         rospy.Subscriber("/sawyer_planner/goal_array", Float32MultiArray, self.get_goal_array, queue_size = 1)
@@ -112,7 +110,15 @@ class SawyerPlanner:
         or_joint_states = rospy.wait_for_message('manipulator_joints', JointState)
         or_joints_pos = numpy.array(or_joint_states.position)
 
-        if not self.sim:
+        if self.sim:
+            # self.apple_offset = [0.5, 0.0, 0.0]
+            # self.goal_array = [[0.8, 0.3, 0.5], [0.8, -0.3, 0.5]]
+            # self.goal_array = [[0.8, 0.3, 0.5]]  # bad run low manip
+            # self.goal_array = [[0.8, 0.1, 0.5]]  # semi okay run
+            self.goal_array = [[0.8, 0.3, 0.2]]  # semi okay run
+            # self.goal_array = [[0.7, -0.3, 0.8]]  # good one
+        # if not self.sim:
+        else:
             # from intera_core_msgs.msg import EndpointState, JointLimits
             import intera_interface
             # rospy.Subscriber("/robot/limb/right/endpoint_state", EndpointState, self.get_robot_ee_position, queue_size = 1)
@@ -263,10 +269,10 @@ class SawyerPlanner:
 
             self.K_VQ = 2.5
 
-            apple_check_srv = AppleCheckRequest()
-            apple_check_srv.apple_pose.x = self.goal[0];
-            apple_check_srv.apple_pose.y = self.goal[1];
-            apple_check_srv.apple_pose.z = self.goal[2];
+            # apple_check_srv = AppleCheckRequest()
+            # apple_check_srv.apple_pose.x = self.goal[0];
+            # apple_check_srv.apple_pose.y = self.goal[1];
+            # apple_check_srv.apple_pose.z = self.goal[2];
 
             # resp = self.apple_check_client.call(apple_check_srv)
 
@@ -301,13 +307,17 @@ class SawyerPlanner:
 
             self.go_to_goal(self.starting_position, self.starting_direction, 0.0)
 
-            apple_check_srv = AppleCheckRequest()
-            apple_check_srv.apple_pose.x = self.goal[0];
-            apple_check_srv.apple_pose.y = self.goal[1];
-            apple_check_srv.apple_pose.z = self.goal[2];
+            if not self.sim:
+                apple_check_srv = AppleCheckRequest()
+                apple_check_srv.apple_pose.x = self.goal[0];
+                apple_check_srv.apple_pose.y = self.goal[1];
+                apple_check_srv.apple_pose.z = self.goal[2];
 
-            rospy.loginfo('checking apple: ' + str(self.goal))
-            resp = self.apple_check_client.call(apple_check_srv)
+                rospy.loginfo('checking apple: ' + str(self.goal))
+                resp = self.apple_check_client.call(apple_check_srv)
+            else:
+                self.remove_from_goal_array(self.goal)
+                # del self.goal_array[0]
 
             # if resp.apple_is_there:
             if 0:
@@ -353,7 +363,17 @@ class SawyerPlanner:
         else:
             pass
 
+    def remove_from_goal_array(self, goal):
+        idx = numpy.linalg.norm(self.goal_array - goal, axis=1).argmin()
+        # print (self.goal_array)
+        # print (numpy.linalg.norm(self.goal_array - goal))
+        del self.goal_array[idx]
+        # raw_input('press_enter')
+
     def sequence_goals(self):
+        if not len(self.goal_array):
+            self.goal = [None]
+            return
         goals = numpy.array(deepcopy(self.goal_array))
         tasks_msg = PoseArray()
         for goal in goals:
@@ -374,6 +394,13 @@ class SawyerPlanner:
         self.sequenced_trajectories = resp.database_trajectories
         self.num_goals_history = len(self.sequenced_goals)
         print self.sequenced_goals
+
+        if self.sim:
+            self.goal = numpy.array(self.sequenced_goals[0])
+            self.goal_off = self.goal - self.go_to_goal_offset * self.normalize(self.goal - self.ee_position)
+
+            self.starting_position = self.goal - numpy.array([self.starting_position_offset, 0.0, 0.0]);
+            self.starting_direction = numpy.array([1.0, 0.0, 0.0])
 
     def get_robot_ee_position(self, msg):
 
@@ -405,34 +432,32 @@ class SawyerPlanner:
 
     def get_goal_array(self, msg):
 
-        goal_array = []
-        goal_array_1D = msg.data
-        if len(goal_array_1D):
-            goal_array_1D = list(msg.data)
-            for i in range(len(goal_array_1D) / 3):
-                goal_array.append(numpy.array(goal_array_1D[3 * i: 3 * i + 3]) - self.apple_offset)
-        self.goal_array = goal_array
+    	if not self.sim:
+	        goal_array = []
+	        goal_array_1D = msg.data
+	        if len(goal_array_1D):
+	            goal_array_1D = list(msg.data)
+	            for i in range(len(goal_array_1D) / 3):
+	                goal_array.append(numpy.array(goal_array_1D[3 * i: 3 * i + 3]) - self.apple_offset)
+	        self.goal_array = goal_array
 
-        if len(self.sequenced_goals):
-            min_dist = numpy.inf
-            current_goal = self.sequenced_goals[0]
-            min_index = len(self.goal_array)
-            for it, goal in enumerate(self.goal_array):
-                dist = sum([(x - y)**2 for x, y in zip(goal, current_goal)])
-                if dist < min_dist:
-                    min_dist = dist
-                    min_index = it
+	        if len(self.sequenced_goals):
+	            min_dist = numpy.inf
+	            current_goal = self.sequenced_goals[0]
+	            min_index = len(self.goal_array)
+	            for it, goal in enumerate(self.goal_array):
+	                dist = sum([(x - y)**2 for x, y in zip(goal, current_goal)])
+	                if dist < min_dist:
+	                    min_dist = dist
+	                    min_index = it
 
-            if min_index != len(self.goal_array):
-                # offset = 0.08
-                self.goal = numpy.array(self.goal_array[min_index])
-                self.goal_off = self.goal - self.go_to_goal_offset * self.normalize(self.goal - self.ee_position)
+	            if min_index != len(self.goal_array):
+	                # offset = 0.08
+	                self.goal = numpy.array(self.goal_array[min_index])
+	                self.goal_off = self.goal - self.go_to_goal_offset * self.normalize(self.goal - self.ee_position)
 
-                self.starting_position = self.goal - numpy.array([self.starting_position_offset, 0.0, 0.0]);
-                self.starting_direction = numpy.array([1.0, 0.0, 0.0])
-
-        if self.sim:
-            self.enable_bridge_pub.publish(Bool(False))
+	                self.starting_position = self.goal - numpy.array([self.starting_position_offset, 0.0, 0.0]);
+	                self.starting_direction = numpy.array([1.0, 0.0, 0.0])
 
     def get_goal(self, msg, offset = 0.08):
 
@@ -477,7 +502,7 @@ class SawyerPlanner:
             else:
                 goal_off = goal - offset * self.normalize(to_goal)
 
-        while numpy.linalg.norm(goal_off - self.ee_position) > 0.01:
+        while numpy.linalg.norm(goal_off - self.ee_position) > 0.01 and not rospy.is_shutdown():
             print("goal_off: " + str(goal_off))
             print("ee_position: " + str(self.ee_position))
             if (self_goal):
@@ -500,6 +525,7 @@ class SawyerPlanner:
                     msg = JointTrajectoryPoint()
                     msg.velocities = numpy.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
                     self.sim_joint_velocities_pub.publish(msg)
+                    break
                 sys.exit()
 
 
@@ -548,6 +574,18 @@ class SawyerPlanner:
                     cmd = self.arm.joint_velocities()
                     cmd = dict(zip(cmd.keys(), joint_vel[::-1]))
                     self.arm.set_joint_velocities(cmd)
+
+            rospy.sleep(0.1)
+
+        joint_vel = numpy.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        if self.sim:
+            msg = JointTrajectoryPoint()
+            msg.velocities = joint_vel
+            self.sim_joint_velocities_pub.publish(msg)
+        else:
+            cmd = self.arm.joint_velocities()
+            cmd = dict(zip(cmd.keys(), joint_vel[::-1]))
+            self.arm.set_joint_velocities(cmd)
 
 
     def plan_to_goal(self, goal = [None], to_goal = [None], offset = 0.13, ignore_trellis=False):
@@ -669,16 +707,20 @@ class SawyerPlanner:
         mid_joint_limit = (self.joint_limits_lower + self.joint_limits_upper) / 2.0
         q_dot = numpy.zeros((7, 1))
 
-        K = 0.05
-
+        K = 0.5
+        weight_vector = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
         for i in range(7):
-            q_dot[i] = - K * (joints[i] - mid_joint_limit[i]) / (self.joint_limits_upper[i] - self.joint_limits_lower[i]) 
+            q_dot[i] = - (K * weight_vector[i]) * (joints[i] - mid_joint_limit[i]) / (self.joint_limits_upper[i] - self.joint_limits_lower[i]) 
 
         # print(numpy.linalg.pinv(J).shape)
         # print(des_vel.shape)
         # print(q_dot.shape)
+        print("joints: " + str(self.manipulator_joints))
+        print ("q: " + str(numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1))))
+        print ("q_dot: " + str(q_dot))
+        print ("qdot_proj: " + str(numpy.dot( (numpy.eye(7) - numpy.dot( numpy.linalg.pinv(J) , J )), q_dot)))
         return numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1)) + numpy.dot( (numpy.eye(7) - numpy.dot( numpy.linalg.pinv(J) , J )), q_dot)
-        #return numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1))
+        # return numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1))
 
     def grab(self):
 
