@@ -710,7 +710,7 @@ class SawyerPlanner:
         K = 0.5
         weight_vector = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
         for i in range(7):
-            q_dot[i] = - (K * weight_vector[i]) * (joints[i] - mid_joint_limit[i]) / (self.joint_limits_upper[i] - self.joint_limits_lower[i]) 
+            q_dot[i] = - (K * weight_vector[i]) * (joints[i] - mid_joint_limit[i]) / ( (self.joint_limits_upper[i] - self.joint_limits_lower[i])**2)
 
         # print(numpy.linalg.pinv(J).shape)
         # print(des_vel.shape)
