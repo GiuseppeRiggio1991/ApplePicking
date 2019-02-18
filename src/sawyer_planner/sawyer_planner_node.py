@@ -112,11 +112,11 @@ class SawyerPlanner:
 
         if self.sim:
             # self.apple_offset = [0.5, 0.0, 0.0]
-            # self.goal_array = [[0.8, 0.3, 0.5], [0.8, -0.3, 0.5]]
+            self.goal_array = [[0.8, 0.3, 0.5], [0.8, -0.3, 0.5]]
             # self.goal_array = [[0.8, 0.3, 0.5]]  # bad run low manip
             # self.goal_array = [[0.8, 0.1, 0.5]]  # semi okay run
-            self.goal_array = [[0.8, 0.3, 0.2]]  # bad run joint limits
-            # self.goal_array = [[0.7, -0.3, 0.8]]  # good one
+            #self.goal_array = [[0.8, 0.3, 0.2]]  # bad run joint limits
+            #self.goal_array = [[0.7, -0.3, 0.8]]  # good one
         # if not self.sim:
         else:
             # from intera_core_msgs.msg import EndpointState, JointLimits
@@ -279,7 +279,7 @@ class SawyerPlanner:
             # if resp.apple_is_there:
             if 1:
                 print("apple is there, going to grab")
-                self.go_to_goal()
+                self.go_to_goal([None], numpy.array([1.0, 0.0, 0.0]), self.go_to_goal_offset)
                 self.state = self.STATE.GRAB
                 # self.state = self.STATE.TO_DROP
             else:
@@ -323,7 +323,8 @@ class SawyerPlanner:
             if 0:
                 print("apple is still there, trying to grab again")
                 # self.drop()
-                self.go_to_goal()
+                #self.go_to_goal()
+                self.go_to_goal([None], numpy.array([1.0, 0.0, 0.0]), self.go_to_goal_offset)
                 self.state = self.STATE.GRAB
             else:
                 print("apple successfully picked, going to drop")
@@ -420,6 +421,7 @@ class SawyerPlanner:
         self.ee_orientation = pyquaternion.Quaternion(ee_pose[:4])
         self.ee_position = numpy.array(ee_pose[4:])
 
+
     # def get_joint_limits(self, msg):
         
         # self.lower_limit = numpy.array(msg.position_lower)
@@ -505,9 +507,13 @@ class SawyerPlanner:
         while numpy.linalg.norm(goal_off - self.ee_position) > 0.01 and not rospy.is_shutdown():
             print("goal_off: " + str(goal_off))
             print("ee_position: " + str(self.ee_position))
+            #print("ee_orientation: " + str(self.ee_orientation))
             if (self_goal):
                 goal = self.goal
                 goal_off = self.goal_off
+                if self.sim:
+                    # update goal_off because ee_position changes
+                    goal_off = goal - offset * self.normalize(goal - self.ee_position)
 
             if numpy.linalg.norm(self.ee_position - goal) < 0.2:
                 # print("disabling updating of apple position because too close")
@@ -535,6 +541,10 @@ class SawyerPlanner:
                 des_omega = - self.K_VQ * self.get_angular_velocity([None], to_goal)
             else:
                 des_omega = - self.K_VQ * self.get_angular_velocity(goal)
+
+            #print("omega: " + str(des_omega))
+
+            #des_omega = numpy.array([0.0, 0.0, 0.0])
 
             des_vel = numpy.append(des_vel_t, des_omega)
 
@@ -705,9 +715,10 @@ class SawyerPlanner:
 
         # add joint limit repulsive potential
         mid_joint_limit = (self.joint_limits_lower + self.joint_limits_upper) / 2.0
+
         q_dot = numpy.zeros((7, 1))
 
-        K = 0.5
+        K = 10.0
         weight_vector = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
         for i in range(7):
             q_dot[i] = - (K * weight_vector[i]) * (joints[i] - mid_joint_limit[i]) / ( (self.joint_limits_upper[i] - self.joint_limits_lower[i])**2)
@@ -715,11 +726,13 @@ class SawyerPlanner:
         # print(numpy.linalg.pinv(J).shape)
         # print(des_vel.shape)
         # print(q_dot.shape)
-        print("joints: " + str(self.manipulator_joints))
-        print ("q: " + str(numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1))))
-        print ("q_dot: " + str(q_dot))
-        print ("qdot_proj: " + str(numpy.dot( (numpy.eye(7) - numpy.dot( numpy.linalg.pinv(J) , J )), q_dot)))
+        #print("joints: " + str(self.manipulator_joints))
+        #print ("q: " + str(numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1))))
+        #print ("q_dot: " + str(q_dot))
+        #print ("qdot_proj: " + str(numpy.dot( (numpy.eye(7) - numpy.dot( numpy.linalg.pinv(J) , J )), q_dot)))
         return numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1)) + numpy.dot( (numpy.eye(7) - numpy.dot( numpy.linalg.pinv(J) , J )), q_dot)
+        #return numpy.dot( (numpy.eye(7) - numpy.dot( numpy.linalg.pinv(J) , J )), q_dot)
+
         # return numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1))
 
     def grab(self):
