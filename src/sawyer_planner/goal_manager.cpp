@@ -7,6 +7,7 @@ GoalManager::GoalManager()
     // Publishers
     goal_pub_ = nh_.advertise<geometry_msgs::Point>("/sawyer_planner/goal", 1);
     goal_array_pub_ = nh_.advertise<std_msgs::Float32MultiArray>("/sawyer_planner/goal_array", 1);
+    raw_points_pub_ = nh_.advertise<std_msgs::Float32MultiArray>("/sawyer_planner/raw_points", 1);
 
     // Server
     apple_check_server_ = nh_.advertiseService("/sawyer_planner/apple_check", &GoalManager::appleCheck, this);
@@ -175,6 +176,16 @@ void GoalManager::updateGoal(const ros::TimerEvent& event)
     {
         pcl::PointCloud<pcl::PointXYZRGBA> cloud;
         pcl::fromROSMsg(cloud_srv.response.cloud, cloud);
+
+        std::vector<float> raw_points;
+        for (int i = 0; i < cloud.size(); i++)
+        {
+            pcl::PointXYZRGBA& p = cloud.points[i];
+            raw_points.insert(raw_points.end(), {p.x, p.y, p.z});
+        }
+        std_msgs::Float32MultiArray raw_points_msg;
+        raw_points_msg.data = raw_points;
+        raw_points_pub_.publish(raw_points_msg);
 
         std::cout << "apples_.size(): " << apples_.size() << std::endl;
         if (apples_.size() == 0)

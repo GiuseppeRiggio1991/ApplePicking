@@ -24,7 +24,7 @@ class GoalManager
         ros::NodeHandle nh_;
 
         // Publishers
-        ros::Publisher goal_pub_, goal_array_pub_;
+        ros::Publisher goal_pub_, goal_array_pub_, raw_points_pub_;
 
         // Servers
         ros::ServiceServer apple_check_server_;

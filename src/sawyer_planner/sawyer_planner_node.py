@@ -43,7 +43,7 @@ class SawyerPlanner:
         self.manipulator_joints = []
         self.num_goals_history = 0  # length of sequenced goals
         self.ee_position = None
-        self.starting_position_offset = 0.3
+        self.starting_position_offset = 0.35
         self.apple_offset = [0.0, 0.0, 0.0]
         # self.go_to_goal_offset = [0.05, 0.0, 0.0]
         self.go_to_goal_offset = 0.12  # offset from apple centre to sawyer end effector frame (not gripper)
@@ -112,11 +112,15 @@ class SawyerPlanner:
 
         if self.sim:
             # self.apple_offset = [0.5, 0.0, 0.0]
-            self.goal_array = [[0.8, 0.3, 0.5], [0.8, -0.3, 0.5]]
+            # self.goal_array = [[0.8, 0.3, 0.5], [0.8, -0.3, 0.5]]
             # self.goal_array = [[0.8, 0.3, 0.5]]  # bad run low manip
             # self.goal_array = [[0.8, 0.1, 0.5]]  # semi okay run
             #self.goal_array = [[0.8, 0.3, 0.2]]  # bad run joint limits
             #self.goal_array = [[0.7, -0.3, 0.8]]  # good one
+            # self.goal_array = [[0.8, -0.4, 0.8]]0.77170295 -0.1971278   0.14966555
+            # self.goal_array = [[0.714682, -0.218761, 0.694819]]
+            self.goal_array = [[0.8, 0.2,   0.2]]  # low manip
+            # self.goal_array = [[0.735962,-0.204364,0.555817]]  # joint limits
         # if not self.sim:
         else:
             # from intera_core_msgs.msg import EndpointState, JointLimits
@@ -248,6 +252,8 @@ class SawyerPlanner:
             print("starting position and direction: ")
             print(self.starting_position, self.starting_direction)
             plan_success = self.plan_to_goal(self.starting_position, self.starting_direction, 0.0)
+            # print("self.goal: " + str(self.goal))
+            # raw_input('press enter to continue...')
 
             if plan_success:
                 self.state = self.STATE.APPROACH
@@ -294,7 +300,9 @@ class SawyerPlanner:
 
             rospy.loginfo("GRAB")
 
-            # self.grab()
+            # if 0:
+            if not self.sim:
+                self.grab()
 
             #self.enable_bridge_pub.publish(Bool(False))
 
@@ -330,9 +338,10 @@ class SawyerPlanner:
                 print("apple successfully picked, going to drop")
                 self.goal = [None]
                 self.state = self.STATE.TO_DROP
+                rospy.sleep(1.0)
                 if not self.sim:
                     self.enable_bridge_pub.publish(Bool(False)) 
-                rospy.sleep(1.0)
+                # rospy.sleep(1.0)
 
         elif self.state == self.STATE.TO_DROP:
 
@@ -350,14 +359,16 @@ class SawyerPlanner:
 
             # self.go_to_place()
 
-            # self.state = self.STATE.DROP
-            self.state = self.STATE.TO_NEXT
+            self.state = self.STATE.DROP
+            # self.state = self.STATE.TO_NEXT
 
         elif self.state == self.STATE.DROP:
 
             rospy.loginfo("DROP")
 
-            self.drop()
+            # if 0:
+            if not self.sim:
+                self.drop()
 
             self.state = self.STATE.TO_NEXT
 
@@ -394,8 +405,8 @@ class SawyerPlanner:
         self.sequenced_goals = [goals[i] for i in resp.sequence]
         self.sequenced_trajectories = resp.database_trajectories
         self.num_goals_history = len(self.sequenced_goals)
-        print self.sequenced_goals
-
+        print("sequenced goals: " + str(self.sequenced_goals))
+        print("resp.sequence: " + str(resp.sequence))
         if self.sim:
             self.goal = numpy.array(self.sequenced_goals[0])
             self.goal_off = self.goal - self.go_to_goal_offset * self.normalize(self.goal - self.ee_position)
@@ -434,32 +445,34 @@ class SawyerPlanner:
 
     def get_goal_array(self, msg):
 
-    	if not self.sim:
-	        goal_array = []
-	        goal_array_1D = msg.data
-	        if len(goal_array_1D):
-	            goal_array_1D = list(msg.data)
-	            for i in range(len(goal_array_1D) / 3):
-	                goal_array.append(numpy.array(goal_array_1D[3 * i: 3 * i + 3]) - self.apple_offset)
-	        self.goal_array = goal_array
+        if not self.sim:
+            goal_array = []
+            goal_array_1D = msg.data
+            if len(goal_array_1D):
+                goal_array_1D = list(msg.data)
+                for i in range(len(goal_array_1D) / 3):
+                    goal_array.append(numpy.array(goal_array_1D[3 * i: 3 * i + 3]) - self.apple_offset)
+            self.goal_array = goal_array
+            print("goal_array: " + str(self.goal_array))
 
-	        if len(self.sequenced_goals):
-	            min_dist = numpy.inf
-	            current_goal = self.sequenced_goals[0]
-	            min_index = len(self.goal_array)
-	            for it, goal in enumerate(self.goal_array):
-	                dist = sum([(x - y)**2 for x, y in zip(goal, current_goal)])
-	                if dist < min_dist:
-	                    min_dist = dist
-	                    min_index = it
+            if len(self.sequenced_goals):
+                min_dist = numpy.inf
+                current_goal = self.sequenced_goals[0]
+                min_index = len(self.goal_array)
+                for it, goal in enumerate(self.goal_array):
+                    dist = sum([(x - y)**2 for x, y in zip(goal, current_goal)])
+                    if dist < min_dist:
+                        min_dist = dist
+                        min_index = it
 
-	            if min_index != len(self.goal_array):
-	                # offset = 0.08
-	                self.goal = numpy.array(self.goal_array[min_index])
-	                self.goal_off = self.goal - self.go_to_goal_offset * self.normalize(self.goal - self.ee_position)
+                if min_index != len(self.goal_array):
+                    # offset = 0.08
+                    self.goal = numpy.array(self.goal_array[min_index])
+                    self.goal_off = self.goal - self.go_to_goal_offset * self.normalize(self.goal - self.ee_position)
 
-	                self.starting_position = self.goal - numpy.array([self.starting_position_offset, 0.0, 0.0]);
-	                self.starting_direction = numpy.array([1.0, 0.0, 0.0])
+                    self.starting_position = self.goal - numpy.array([self.starting_position_offset, 0.0, 0.0]);
+                    self.starting_direction = numpy.array([1.0, 0.0, 0.0])
+                print("goal: " + str(self.goal))
 
     def get_goal(self, msg, offset = 0.08):
 
@@ -493,10 +506,10 @@ class SawyerPlanner:
     def go_to_goal(self, goal = [None], to_goal = [None], offset = 0.05):
 
         if goal[0] == None:
-            goal = self.goal
+            goal = deepcopy(self.goal)
             self_goal = True
             print("goal: " + str(goal))
-            goal_off = self.goal_off
+            goal_off = deepcopy(self.goal_off)
         else:
             self_goal = False
             if to_goal[0] == None:
@@ -509,16 +522,23 @@ class SawyerPlanner:
             print("ee_position: " + str(self.ee_position))
             #print("ee_orientation: " + str(self.ee_orientation))
             if (self_goal):
-                goal = self.goal
-                goal_off = self.goal_off
+                goal = deepcopy(self.goal)
+                goal_off = deepcopy(self.goal_off)
                 if self.sim:
                     # update goal_off because ee_position changes
                     goal_off = goal - offset * self.normalize(goal - self.ee_position)
+            
+            print("ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
+            print("[distance calc] ee_position: " + str(self.ee_position))
+            print("[distance calc] goal: " + str(goal))
 
-            if numpy.linalg.norm(self.ee_position - goal) < 0.2:
-                # print("disabling updating of apple position because too close")
+            if numpy.linalg.norm(self.ee_position - self.goal) < 0.2:
+                print("disabling updating of apple position because too close")
                 if not self.sim:
                     self.enable_bridge_pub.publish(Bool(False))
+            else:
+                if not self.sim:
+                    self.enable_bridge_pub.publish(Bool(True))
 
             # check if joints are outside the limits
             # joints = self.arm.joint_angles()
@@ -639,6 +659,10 @@ class SawyerPlanner:
         if not resp.success:
             rospy.logwarn("planning to next target failed")
         else:
+            # T = openravepy.transformLookat(self.sequenced_goals[0] + [0.1, 0.0, 0.0], self.sequenced_goals[0] - [self.starting_position_offset, 0.0, 0.0], [0, 0, -1])
+            # T = numpy.dot(T, numpy.linalg.inv(self.T_G2EE))
+            goal_off = self.sequenced_goals[0] - [self.starting_position_offset, 0.0, 0.0]
+            # goal_off = T[:3, 3]
         # message = "moveArm," + ",".join(map(str, goal_off_camera)) + "," + ",".join(map(str, [-0.5, 0.5, -0.5, 0.5])) + "\n"
         
         # resp = ""
@@ -658,13 +682,14 @@ class SawyerPlanner:
 
         # print("Starting moving")
 
-            while numpy.linalg.norm(goal_off - self.ee_position) > 0.04:
+            while numpy.linalg.norm(goal_off - self.ee_position) > 0.01 and not rospy.is_shutdown():
                 print("waiting for arm to reach goal_off pose")
                 print("goal_off_camera: " + str(goal_off_camera))
                 print("goal_off: " + str(goal_off))
                 print("self.ee_position: " + str(self.ee_position))
                 rospy.sleep(0.1)
                 pass 
+            rospy.sleep(1.0)
 
         return resp.success
 
