@@ -119,8 +119,17 @@ class SawyerPlanner:
             #self.goal_array = [[0.7, -0.3, 0.8]]  # good one
             # self.goal_array = [[0.8, -0.4, 0.8]]0.77170295 -0.1971278   0.14966555
             # self.goal_array = [[0.714682, -0.218761, 0.694819]]
-            self.goal_array = [[0.8, 0.2,   0.2]]  # low manip
-            # self.goal_array = [[0.735962,-0.204364,0.555817]]  # joint limits
+            #self.goal_array = [[0.8, 0.2,   0.2]]  # low manip
+            #self.goal_array = [[0.735962,-0.204364,0.555817]]  # joint limits
+            #self.goal_array = [[0.8, 0.3, 0.2]] # planner fails
+            
+
+
+            #self.goal_array = []
+            #for index in range (-6, 7):
+            #    self.goal_array.append([0.8, index/20.0, 0.4])
+
+
         # if not self.sim:
         else:
             # from intera_core_msgs.msg import EndpointState, JointLimits
@@ -510,6 +519,10 @@ class SawyerPlanner:
             self_goal = True
             print("goal: " + str(goal))
             goal_off = deepcopy(self.goal_off)
+            if self.sim:
+                # update goal_off because ee_position changes
+                goal_off = goal - offset * self.normalize(goal - self.ee_position)
+
         else:
             self_goal = False
             if to_goal[0] == None:
@@ -740,21 +753,34 @@ class SawyerPlanner:
 
         # add joint limit repulsive potential
         mid_joint_limit = (self.joint_limits_lower + self.joint_limits_upper) / 2.0
+        Q_star = (self.joint_limits_upper - self.joint_limits_lower) / 20.0
 
         q_dot = numpy.zeros((7, 1))
 
-        K = 10.0
+        max_joint_speed = 5.0
+        K = 2.0
         weight_vector = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
         for i in range(7):
-            q_dot[i] = - (K * weight_vector[i]) * (joints[i] - mid_joint_limit[i]) / ( (self.joint_limits_upper[i] - self.joint_limits_lower[i])**2)
+            #q_dot[i] = - (K * weight_vector[i]) * (joints[i] - mid_joint_limit[i]) / ( (self.joint_limits_upper[i] - self.joint_limits_lower[i])**2)
+            if (abs(joints[i] - self.joint_limits_upper[i]) <= Q_star[i]):
+               q_dot[i] = - (K * weight_vector[i] / (self.joint_limits_upper[i] - self.joint_limits_lower[i])) * ( 1.0/Q_star[i] - 1.0/abs(joints[i] - self.joint_limits_upper[i]) ) * (1.0/(joints[i] - self.joint_limits_upper[i])**2) * abs(joints[i] - self.joint_limits_upper[i]) / (joints[i] - self.joint_limits_upper[i])
+            else:
+                q_dot[i] = 0
+
+            if (abs(joints[i] - self.joint_limits_lower[i]) <= Q_star[i]):
+                q_dot[i] = q_dot[i] - (K * weight_vector[i] / (self.joint_limits_upper[i] - self.joint_limits_lower[i])) * ( 1.0/Q_star[i] - 1.0/abs(joints[i] - self.joint_limits_lower[i]) ) * (1.0/(joints[i] - self.joint_limits_lower[i])**2) * abs(joints[i] - self.joint_limits_lower[i]) / (joints[i] - self.joint_limits_lower[i])
+
+            if (abs(q_dot[i]) > max_joint_speed):
+                q_dot[i] = max_joint_speed * self.normalize(q_dot[i])
+
 
         # print(numpy.linalg.pinv(J).shape)
         # print(des_vel.shape)
         # print(q_dot.shape)
-        #print("joints: " + str(self.manipulator_joints))
-        #print ("q: " + str(numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1))))
-        #print ("q_dot: " + str(q_dot))
-        #print ("qdot_proj: " + str(numpy.dot( (numpy.eye(7) - numpy.dot( numpy.linalg.pinv(J) , J )), q_dot)))
+        print("joints: " + str(self.manipulator_joints))
+        print ("q: " + str(numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1))))
+        print ("q_dot: " + str(q_dot))
+        print ("qdot_proj: " + str(numpy.dot( (numpy.eye(7) - numpy.dot( numpy.linalg.pinv(J) , J )), q_dot)))
         return numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1)) + numpy.dot( (numpy.eye(7) - numpy.dot( numpy.linalg.pinv(J) , J )), q_dot)
         #return numpy.dot( (numpy.eye(7) - numpy.dot( numpy.linalg.pinv(J) , J )), q_dot)
 
