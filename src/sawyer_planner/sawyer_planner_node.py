@@ -19,6 +19,7 @@ from geometry_msgs.msg import PoseArray
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectoryPoint
+from trajectory_msgs.msg import JointTrajectory
 from std_msgs.msg import Float32MultiArray
 from std_msgs.msg import Bool
 from std_srvs.srv import SetBool, Trigger
@@ -58,6 +59,7 @@ class SawyerPlanner:
         self.MAX_RECOVERY_DURATION = 1.0
         self.recovery_flag = False
         self.start_recovery_time = None
+        self.recovery_trajectory = []
 
         self.joint_limits_lower = numpy.array([-3.0503, -3.8095, -3.0426, -3.0439, -2.9761, -2.9761, -4.7124]) + self.limits_epsilon
         self.joint_limits_upper = numpy.array([3.0503, 2.2736, 3.0426, 3.0439, 2.9761, 2.9761, 4.7124]) - self.limits_epsilon
@@ -105,6 +107,7 @@ class SawyerPlanner:
         self.apple_check_client = rospy.ServiceProxy("/sawyer_planner/apple_check", AppleCheck)
         self.start_pipeline_client = rospy.ServiceProxy("/sawyer_planner/start_pipeline", Trigger)
         # self.plan_pose_client = rospy.ServiceProxy("/plan_pose_srv", PlanPose)
+        self.optimise_offset_client = rospy.ServiceProxy("/optimise_offset_srv", OptimiseTrajectory)
         self.optimise_trajectory_client = rospy.ServiceProxy("/optimise_trajectory_srv", OptimiseTrajectory)
         self.sequencer_client = rospy.ServiceProxy("/sequence_tasks_srv", SequenceTasks)
 
@@ -126,19 +129,22 @@ class SawyerPlanner:
             #self.goal_array = [[0.7, -0.3, 0.8]]  # good one
             # self.goal_array = [[0.8, -0.4, 0.8]]0.77170295 -0.1971278   0.14966555
             # self.goal_array = [[0.914682, -0.218761, 0.694819]]
-            self.goal_array = [[0.9, 0.2,   0.7]]  # low manip
             # self.goal_array= [ [ 0.9,         0.12397271,  0.77931632]]  # wobbly
             #self.goal_array = [[0.735962,-0.204364,0.555817]]  # joint limits
-            #self.goal_array = [[0.8, 0.3, 0.2]] # planner fails
+            # self.goal_array = [[0.8, 0.0, 0.2]] # planner fails
             # self.goal_array = [[ 0.95,        0.30172234,  0.6943676 ]]  # joint limits
 
-            # random.seed(time.time())
-            # self.goal_array = []
-            # x_val = 0.9
-            # for i in range(10):
-            #     rand_y = random.uniform(-0.35, 0.35)
-            #     rand_z = random.uniform(0.2, 0.8)
-            #     self.goal_array.append([x_val, rand_y, rand_z])
+            # after fixing joint limits issue
+            # self.goal_array = [[0.9, 0.3,   0.7]]  # low manip
+
+            #generate n number of random targets
+            random.seed(time.time())
+            self.goal_array = []
+            x_val = 0.8
+            for i in range(10):
+                rand_y = random.uniform(-0.5, 0.5)
+                rand_z = random.uniform(0.2, 0.7)
+                self.goal_array.append([x_val, rand_y, rand_z])
 
             #self.goal_array = []
             #for index in range (-6, 7):
@@ -324,6 +330,7 @@ class SawyerPlanner:
             # if resp.apple_is_there:
             # if 1:
             print("apple is there, going to grab")
+            self.recovery_trajectory = []
             if self.go_to_goal([None], numpy.array([1.0, 0.0, 0.0]), self.go_to_goal_offset):
                 self.state = self.STATE.GRAB
             else:
@@ -379,13 +386,22 @@ class SawyerPlanner:
             rospy.loginfo("RECOVER")
             self.recovery_flag = True
             self.start_recovery_time = rospy.get_time()
+            rospy.sleep(0.1)
+            if numpy.linalg.norm(numpy.asarray(self.recovery_trajectory[-1]) - numpy.asarray(self.recovery_trajectory[0])) > 0.01:
+                self.recovery_trajectory.append(self.manipulator_joints)
 
-            print ("start2: ", self.starting_position, " ", self.starting_direction)
+                print("self.recovery_trajectory[-1]: " + str(self.recovery_trajectory[-1]))
+                print("self.recovery_trajectory[0]: " + str(self.recovery_trajectory[0]))
+                traj_msg = self.list_trajectory_msg(self.recovery_trajectory[::-1])
+                resp = self.optimise_trajectory_client.call(traj_msg)
+                if not resp.success:
+                # print ("start2: ", self.starting_position, " ", self.starting_direction)
 
-            if not self.go_to_goal(self.starting_position, self.starting_direction, 0.0):
-                rospy.logerr("could not move back to drop, don't know how to recover, exiting...")
-                sys.exit()
-            
+                # if not self.go_to_goal(self.starting_position, self.starting_direction, 0.0):
+                    rospy.logerr("could not move back to drop, don't know how to recover, exiting...")
+                    sys.exit()
+            else:
+                rospy.logwarn("arm didn't appear to move much before recovery state, continuing without recovery procedure")
             self.goal = [None]
 
             self.recovery_flag = False
@@ -397,11 +413,29 @@ class SawyerPlanner:
 
             rospy.loginfo("TO_DROP")
 
-            print ("start2: ", self.starting_position, " ", self.starting_direction)
+            rospy.sleep(0.1)
+            if numpy.linalg.norm(numpy.asarray(self.recovery_trajectory[-1]) - numpy.asarray(self.recovery_trajectory[0])) > 0.01:
+                self.recovery_trajectory.append(self.manipulator_joints)
 
-            if not self.go_to_goal(self.starting_position, self.starting_direction, 0.0):
-                rospy.logerr("could not move back to drop, don't know how to recover, exiting...")
+                print("self.recovery_trajectory[-1]: " + str(self.recovery_trajectory[-1]))
+                print("self.recovery_trajectory[0]: " + str(self.recovery_trajectory[0]))
+                traj_msg = self.list_trajectory_msg(self.recovery_trajectory[::-1])
+                resp = self.optimise_trajectory_client.call(traj_msg)
+                if not resp.success:
+                # print ("start2: ", self.starting_position, " ", self.starting_direction)
+
+                # if not self.go_to_goal(self.starting_position, self.starting_direction, 0.0):
+                    rospy.logerr("could not move back to drop, don't know how to recover, exiting...")
+                    sys.exit()
+            else:
+                rospy.logwarn("arm didn't appear to move much before approaching state, shouldn't of happened when moving to drop...exiting")
                 sys.exit()
+
+            # print ("start2: ", self.starting_position, " ", self.starting_direction)
+
+            # if not self.go_to_goal(self.starting_position, self.starting_direction, 0.0):
+            #     rospy.logerr("could not move back to drop, don't know how to recover, exiting...")
+            #     sys.exit()
 
             self.goal = [None]
 
@@ -431,6 +465,14 @@ class SawyerPlanner:
 
         else:
             pass
+
+    def list_trajectory_msg(self, traj):
+        traj_msg = JointTrajectory()
+        for positions in traj:
+            point = JointTrajectoryPoint()
+            point.positions = positions
+            traj_msg.points.append(point)
+        return traj_msg
 
     def remove_from_goal_array(self, goal):
         idx = numpy.linalg.norm(self.goal_array - goal, axis=1).argmin()
@@ -644,12 +686,13 @@ class SawyerPlanner:
             rospy.loginfo_throttle(0.2, "goal_off: " + str(goal_off))
             # print("ee_position: " + str(self.ee_position))
             #print("ee_orientation: " + str(self.ee_orientation))
-            if (self_goal):
+            if (self_goal):  # means servo'ing to a dynamic target
                 goal = deepcopy(self.goal)
                 goal_off = deepcopy(self.goal_off)
                 if self.sim:
                     # update goal_off because ee_position changes
                     goal_off = goal - offset * self.normalize(goal - self.ee_position)
+                self.recovery_trajectory.append(copy(self.manipulator_joints))
             
             rospy.loginfo_throttle(0.2, "ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
             rospy.loginfo_throttle(0.2, "[distance calc] ee_position: " + str(self.ee_position))
@@ -745,7 +788,7 @@ class SawyerPlanner:
         plan_pose_msg.orientation.z = -0.5
         plan_pose_msg.orientation.w = 0.5
         # resp = self.plan_pose_client(plan_pose_msg, ignore_trellis)
-        resp = self.optimise_trajectory_client(self.sequenced_trajectories[0])
+        resp = self.optimise_offset_client(self.sequenced_trajectories[0])
 
         if not resp.success:
             rospy.logwarn("planning to next target failed")
