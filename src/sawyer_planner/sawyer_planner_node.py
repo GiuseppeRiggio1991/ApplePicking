@@ -6,6 +6,7 @@ import openravepy
 import numpy
 import prpy
 import sys
+import random
 from openravepy.misc import InitOpenRAVELogging
 from prpy.planning.cbirrt import CBiRRTPlanner
 from copy import *
@@ -34,7 +35,7 @@ class SawyerPlanner:
     def __init__(self, sim=False):
 
         self.environment_setup()
-        self.STATE = enum.Enum('STATE', 'SEARCH TO_NEXT APPROACH GRAB CHECK_GRASPING TO_DROP DROP')
+        self.STATE = enum.Enum('STATE', 'SEARCH TO_NEXT APPROACH GRAB CHECK_GRASPING TO_DROP DROP RECOVER')
 
         self.goal = [None]
         self.goal_array = []
@@ -53,9 +54,15 @@ class SawyerPlanner:
         self.K_VQ = 2.1
         self.CONFIG_UP = numpy.array([0.0, 0.0, 0.0, 0.0, 0.0, -numpy.pi/2, 0.0])
         self.MIN_MANIPULABILITY = 0.025
+        self.MIN_MANIPULABILITY_RECOVER = 0.02
+        self.MAX_RECOVERY_DURATION = 1.0
+        self.recovery_flag = False
+        self.start_recovery_time = None
 
         self.joint_limits_lower = numpy.array([-3.0503, -3.8095, -3.0426, -3.0439, -2.9761, -2.9761, -4.7124]) + self.limits_epsilon
         self.joint_limits_upper = numpy.array([3.0503, 2.2736, 3.0426, 3.0439, 2.9761, 2.9761, 4.7124]) - self.limits_epsilon
+        self.joint_limits_lower_recover = numpy.array([-3.0503, -3.8095, -3.0426, -3.0439, -2.9761, -2.9761, -4.7124])
+        self.joint_limits_upper_recover = numpy.array([3.0503, 2.2736, 3.0426, 3.0439, 2.9761, 2.9761, 4.7124])
 
         self.joint_names = ['right_j0', 'right_j1', 'right_j2', 'right_j3', 'right_j4', 'right_j5', 'right_j6']
 
@@ -75,8 +82,8 @@ class SawyerPlanner:
         #             [0.0, 0.0, 0.0, 1.0]
         #             ])
         self.T_G2EE = numpy.array([
-                    [0.9961947, -0.0871557, 0.0, 0.0],
-                    [0.0871557, 0.9961947, 0.0, 0.075],
+                    [0.9961947, 0.0871557, 0.0, 0.0],
+                    [-0.0871557, 0.9961947, 0.0, 0.075],
                     [0.0, 0.0, 1.0, -0.12],
                     [0.0, 0.0, 0.0, 1.0]
                     ])
@@ -118,12 +125,20 @@ class SawyerPlanner:
             #self.goal_array = [[0.8, 0.3, 0.2]]  # bad run joint limits
             #self.goal_array = [[0.7, -0.3, 0.8]]  # good one
             # self.goal_array = [[0.8, -0.4, 0.8]]0.77170295 -0.1971278   0.14966555
-            # self.goal_array = [[0.714682, -0.218761, 0.694819]]
-            #self.goal_array = [[0.8, 0.2,   0.2]]  # low manip
+            # self.goal_array = [[0.914682, -0.218761, 0.694819]]
+            self.goal_array = [[0.9, 0.2,   0.7]]  # low manip
+            # self.goal_array= [ [ 0.9,         0.12397271,  0.77931632]]  # wobbly
             #self.goal_array = [[0.735962,-0.204364,0.555817]]  # joint limits
             #self.goal_array = [[0.8, 0.3, 0.2]] # planner fails
-            
+            # self.goal_array = [[ 0.95,        0.30172234,  0.6943676 ]]  # joint limits
 
+            # random.seed(time.time())
+            # self.goal_array = []
+            # x_val = 0.9
+            # for i in range(10):
+            #     rand_y = random.uniform(-0.35, 0.35)
+            #     rand_z = random.uniform(0.2, 0.8)
+            #     self.goal_array.append([x_val, rand_y, rand_z])
 
             #self.goal_array = []
             #for index in range (-6, 7):
@@ -226,6 +241,18 @@ class SawyerPlanner:
 
         return numpy.min(s)/numpy.max(s)
 
+    def remove_current_apple(self):
+        if not self.sim:
+            apple_check_srv = AppleCheckRequest()
+            apple_check_srv.apple_pose.x = self.goal[0];
+            apple_check_srv.apple_pose.y = self.goal[1];
+            apple_check_srv.apple_pose.z = self.goal[2];
+
+            rospy.loginfo('checking apple: ' + str(self.goal))
+            resp = self.apple_check_client.call(apple_check_srv)
+        else:
+            self.remove_from_goal_array(self.goal)
+
     def update(self):
 
         if self.state == self.STATE.SEARCH:
@@ -267,8 +294,11 @@ class SawyerPlanner:
             if plan_success:
                 self.state = self.STATE.APPROACH
             else:
-                rospy.logerr('plan failed, exiting...')
-                sys.exit()
+                rospy.logerr('plan failed, going to next...')
+                self.remove_current_apple()
+                self.state = self.STATE.TO_NEXT
+                # blacklist_goal_srv(self.goal)
+                # sys.exit()
 
         elif self.state == self.STATE.APPROACH:
 
@@ -292,18 +322,23 @@ class SawyerPlanner:
             # resp = self.apple_check_client.call(apple_check_srv)
 
             # if resp.apple_is_there:
-            if 1:
-                print("apple is there, going to grab")
-                self.go_to_goal([None], numpy.array([1.0, 0.0, 0.0]), self.go_to_goal_offset)
+            # if 1:
+            print("apple is there, going to grab")
+            if self.go_to_goal([None], numpy.array([1.0, 0.0, 0.0]), self.go_to_goal_offset):
                 self.state = self.STATE.GRAB
-                # self.state = self.STATE.TO_DROP
             else:
-                print("apple is NOT there, going to next apple")
-                #rospy.logerr("There are no apples to pick!")
-                #sys.exit()
-                self.goal[0] = None
-                print("self.goal: " + str(self.goal))
-                self.state = self.STATE.TO_NEXT
+                self.remove_current_apple()
+                self.state = self.STATE.RECOVER
+                # blacklist_goal_srv(self.goal)
+
+                # self.state = self.STATE.TO_DROP
+            # else:
+            #     print("apple is NOT there, going to next apple")
+            #     #rospy.logerr("There are no apples to pick!")
+            #     #sys.exit()
+            #     self.goal[0] = None
+            #     print("self.goal: " + str(self.goal))
+            #     self.state = self.STATE.TO_NEXT
 
         elif self.state == self.STATE.GRAB:
 
@@ -320,44 +355,57 @@ class SawyerPlanner:
         elif self.state == self.STATE.CHECK_GRASPING:
 
             rospy.loginfo("CHECK_GRASPING")
-            print ("start2: ", self.starting_position, " ", self.starting_direction)
 
-            self.go_to_goal(self.starting_position, self.starting_direction, 0.0)
-
-            if not self.sim:
-                apple_check_srv = AppleCheckRequest()
-                apple_check_srv.apple_pose.x = self.goal[0];
-                apple_check_srv.apple_pose.y = self.goal[1];
-                apple_check_srv.apple_pose.z = self.goal[2];
-
-                rospy.loginfo('checking apple: ' + str(self.goal))
-                resp = self.apple_check_client.call(apple_check_srv)
-            else:
-                self.remove_from_goal_array(self.goal)
+            self.remove_current_apple()
                 # del self.goal_array[0]
 
             # if resp.apple_is_there:
-            if 0:
-                print("apple is still there, trying to grab again")
-                # self.drop()
-                #self.go_to_goal()
-                self.go_to_goal([None], numpy.array([1.0, 0.0, 0.0]), self.go_to_goal_offset)
-                self.state = self.STATE.GRAB
-            else:
-                print("apple successfully picked, going to drop")
-                self.goal = [None]
-                self.state = self.STATE.TO_DROP
-                rospy.sleep(1.0)
-                if not self.sim:
-                    self.enable_bridge_pub.publish(Bool(False)) 
+            # if 0:
+            #     print("apple is still there, trying to grab again")
+            #     # self.drop()
+            #     #self.go_to_goal()
+            #     self.go_to_goal([None], numpy.array([1.0, 0.0, 0.0]), self.go_to_goal_offset)
+            #     self.state = self.STATE.GRAB
+            # else:
+            print("apple successfully picked, going to drop")
+            self.state = self.STATE.TO_DROP
+            rospy.sleep(1.0)
+            if not self.sim:
+                self.enable_bridge_pub.publish(Bool(False)) 
                 # rospy.sleep(1.0)
+
+        elif self.state == self.STATE.RECOVER:
+
+            rospy.loginfo("RECOVER")
+            self.recovery_flag = True
+            self.start_recovery_time = rospy.get_time()
+
+            print ("start2: ", self.starting_position, " ", self.starting_direction)
+
+            if not self.go_to_goal(self.starting_position, self.starting_direction, 0.0):
+                rospy.logerr("could not move back to drop, don't know how to recover, exiting...")
+                sys.exit()
+            
+            self.goal = [None]
+
+            self.recovery_flag = False
+
+            self.state = self.STATE.TO_NEXT
+
 
         elif self.state == self.STATE.TO_DROP:
 
             rospy.loginfo("TO_DROP")
 
+            print ("start2: ", self.starting_position, " ", self.starting_direction)
 
-            self.K_VQ = 0.5
+            if not self.go_to_goal(self.starting_position, self.starting_direction, 0.0):
+                rospy.logerr("could not move back to drop, don't know how to recover, exiting...")
+                sys.exit()
+
+            self.goal = [None]
+
+            # self.K_VQ = 0.5
             # goal = deepcopy(self.goal)
             # goal[0] -= 0.35
             # # to_goal = numpy.dot( self.ee_orientation.rotation_matrix, numpy.array([0.0, 0.0, 1.0]) )
@@ -511,13 +559,75 @@ class SawyerPlanner:
     #         cmd = dict(zip(joints.keys(), self.qstart))
     #         self.arm.move_to_joint_positions(cmd)
                            
+    def stop_arm(self):
+        joint_vel = numpy.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        if self.sim:
+            msg = JointTrajectoryPoint()
+            msg.velocities = joint_vel
+            self.sim_joint_velocities_pub.publish(msg)
+        else:
+            cmd = self.arm.joint_velocities()
+            cmd = dict(zip(cmd.keys(), joint_vel[::-1]))
+            self.arm.set_joint_velocities(cmd)
+
+    def is_in_joint_limits(self):
+        joints = copy(self.manipulator_joints)
+        if not self.recovery_flag:
+            if (joints <= self.joint_limits_lower).any() or (joints >= self.joint_limits_upper).any():
+                rospy.loginfo("joints: " + str(joints))
+                rospy.logwarn('joints are about to go outside of limits, exiting...')
+                self.stop_arm()
+                return False
+            else:
+                return True
+        else:
+            rospy.logwarn(str(rospy.get_time() - self.start_recovery_time))
+            if rospy.get_time() - self.start_recovery_time < self.MAX_RECOVERY_DURATION:
+                return True
+            else:
+                rospy.loginfo("joints: " + str(joints))
+                rospy.logerr("took too long to recover, exiting...")
+                self.stop_arm()
+                return False
+            # if (joints <= self.joint_limits_lower_recover).any() or (joints >= self.joint_limits_upper_recover).any():
+            #     rospy.loginfo("joints: " + str(joints))
+            #     rospy.logwarn('joints are about to go outside of recover limits, exiting...')
+            #     self.stop_arm()
+            #     return False
+            # else:
+            #     return True
+
+    def is_greater_min_manipulability(self):
+        #manipulability = self.computeManipulability()
+        manipulability = self.computeReciprocalConditionNumber()
+        if not self.recovery_flag:
+            if (manipulability < self.MIN_MANIPULABILITY):
+            # if 0:
+                rospy.logwarn("detected low manipulability, exiting: " + str(manipulability))
+                # singularity detected, send zero velocity to the robot and exit
+                self.stop_arm()
+                # sys.exit()
+                return False
+            else:
+                return True
+        else:
+            if (manipulability < self.MIN_MANIPULABILITY_RECOVER):
+            # if 0:
+                rospy.logwarn("detected low manipulability in recovery, exiting: " + str(manipulability))
+                # singularity detected, send zero velocity to the robot and exit
+                self.stop_arm()
+                # sys.exit()
+                return False
+            else:
+                return True
+
         
     def go_to_goal(self, goal = [None], to_goal = [None], offset = 0.05):
 
         if goal[0] == None:
             goal = deepcopy(self.goal)
             self_goal = True
-            print("goal: " + str(goal))
+            rospy.loginfo("goal: " + str(goal))
             goal_off = deepcopy(self.goal_off)
             if self.sim:
                 # update goal_off because ee_position changes
@@ -531,8 +641,8 @@ class SawyerPlanner:
                 goal_off = goal - offset * self.normalize(to_goal)
 
         while numpy.linalg.norm(goal_off - self.ee_position) > 0.01 and not rospy.is_shutdown():
-            print("goal_off: " + str(goal_off))
-            print("ee_position: " + str(self.ee_position))
+            rospy.loginfo_throttle(0.2, "goal_off: " + str(goal_off))
+            # print("ee_position: " + str(self.ee_position))
             #print("ee_orientation: " + str(self.ee_orientation))
             if (self_goal):
                 goal = deepcopy(self.goal)
@@ -541,12 +651,12 @@ class SawyerPlanner:
                     # update goal_off because ee_position changes
                     goal_off = goal - offset * self.normalize(goal - self.ee_position)
             
-            print("ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
-            print("[distance calc] ee_position: " + str(self.ee_position))
-            print("[distance calc] goal: " + str(goal))
+            rospy.loginfo_throttle(0.2, "ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
+            rospy.loginfo_throttle(0.2, "[distance calc] ee_position: " + str(self.ee_position))
+            rospy.loginfo_throttle(0.2, "[distance calc] goal: " + str(goal))
 
-            if numpy.linalg.norm(self.ee_position - self.goal) < 0.2:
-                print("disabling updating of apple position because too close")
+            if numpy.linalg.norm(self.ee_position - self.goal) < 0.3:  # 0.2m min range on sr300 and +0.1 to account for camera frame offset from EE
+                rospy.loginfo_throttle(0.2, "disabling updating of apple position because too close")
                 if not self.sim:
                     self.enable_bridge_pub.publish(Bool(False))
             else:
@@ -556,16 +666,10 @@ class SawyerPlanner:
             # check if joints are outside the limits
             # joints = self.arm.joint_angles()
             # joints = joints.values()[::-1]  # need to reverse because method's ordering is j6-j0
-            joints = copy(self.manipulator_joints)
 
-            if (joints <= self.joint_limits_lower).any() or (joints >= self.joint_limits_upper).any():
-                rospy.logerr('joints are about to go outside of limits, exiting...')
-                if self.sim:
-                    msg = JointTrajectoryPoint()
-                    msg.velocities = numpy.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-                    self.sim_joint_velocities_pub.publish(msg)
-                    break
-                sys.exit()
+            if not self.is_in_joint_limits():
+                return False
+                # sys.exit()
 
 
             des_vel_t = self.K_V * (goal_off - self.ee_position)
@@ -585,28 +689,9 @@ class SawyerPlanner:
             #print "des_vel: ", des_vel
 
             #singularity check
-
-            #manipulability = self.computeManipulability()
-            manipulability = self.computeReciprocalConditionNumber()
-            if (manipulability < self.MIN_MANIPULABILITY):
-            # if 0:
-
-                rospy.loginfo("detected low manipulability, exiting: " + str(manipulability))
-                # singularity detected, send zero velocity to the robot and exit
-
-                joint_vel = numpy.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-                if self.sim:
-                    msg = JointTrajectoryPoint()
-                    msg.velocities = joint_vel
-                    self.sim_joint_velocities_pub.publish(msg)
-                else:
-                    cmd = self.arm.joint_velocities()
-                    cmd = dict(zip(cmd.keys(), joint_vel[::-1]))
-                    self.arm.set_joint_velocities(cmd)
-                sys.exit()
-
+            if not self.is_greater_min_manipulability():
+                return False
             else:
-
                 joint_vel = self.compute_joint_vel(des_vel)
                 # print("joint_vel: " + str(joint_vel))
                 if self.sim:
@@ -618,17 +703,10 @@ class SawyerPlanner:
                     cmd = dict(zip(cmd.keys(), joint_vel[::-1]))
                     self.arm.set_joint_velocities(cmd)
 
-            rospy.sleep(0.1)
+            # rospy.sleep(0.1)
 
-        joint_vel = numpy.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-        if self.sim:
-            msg = JointTrajectoryPoint()
-            msg.velocities = joint_vel
-            self.sim_joint_velocities_pub.publish(msg)
-        else:
-            cmd = self.arm.joint_velocities()
-            cmd = dict(zip(cmd.keys(), joint_vel[::-1]))
-            self.arm.set_joint_velocities(cmd)
+        self.stop_arm()
+        return True
 
 
     def plan_to_goal(self, goal = [None], to_goal = [None], offset = 0.13, ignore_trellis=False):
@@ -695,13 +773,13 @@ class SawyerPlanner:
 
         # print("Starting moving")
 
-            while numpy.linalg.norm(goal_off - self.ee_position) > 0.01 and not rospy.is_shutdown():
-                print("waiting for arm to reach goal_off pose")
-                print("goal_off_camera: " + str(goal_off_camera))
-                print("goal_off: " + str(goal_off))
-                print("self.ee_position: " + str(self.ee_position))
-                rospy.sleep(0.1)
-                pass 
+            # while numpy.linalg.norm(goal_off - self.ee_position) > 0.01 and not rospy.is_shutdown():
+            #     print("waiting for arm to reach goal_off pose")
+            #     print("goal_off_camera: " + str(goal_off_camera))
+            #     print("goal_off: " + str(goal_off))
+            #     print("self.ee_position: " + str(self.ee_position))
+            #     rospy.sleep(0.1)
+            #     pass 
             rospy.sleep(1.0)
 
         return resp.success
@@ -757,8 +835,8 @@ class SawyerPlanner:
 
         q_dot = numpy.zeros((7, 1))
 
-        max_joint_speed = 5.0
-        K = 2.0
+        max_joint_speed = 1.0
+        K = 1.0
         weight_vector = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
         for i in range(7):
             #q_dot[i] = - (K * weight_vector[i]) * (joints[i] - mid_joint_limit[i]) / ( (self.joint_limits_upper[i] - self.joint_limits_lower[i])**2)
@@ -777,10 +855,10 @@ class SawyerPlanner:
         # print(numpy.linalg.pinv(J).shape)
         # print(des_vel.shape)
         # print(q_dot.shape)
-        print("joints: " + str(self.manipulator_joints))
-        print ("q: " + str(numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1))))
-        print ("q_dot: " + str(q_dot))
-        print ("qdot_proj: " + str(numpy.dot( (numpy.eye(7) - numpy.dot( numpy.linalg.pinv(J) , J )), q_dot)))
+        # print("joints: " + str(self.manipulator_joints))
+        # print ("q: " + str(numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1))))
+        # print ("q_dot: " + str(q_dot))
+        # print ("qdot_proj: " + str(numpy.dot( (numpy.eye(7) - numpy.dot( numpy.linalg.pinv(J) , J )), q_dot)))
         return numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1)) + numpy.dot( (numpy.eye(7) - numpy.dot( numpy.linalg.pinv(J) , J )), q_dot)
         #return numpy.dot( (numpy.eye(7) - numpy.dot( numpy.linalg.pinv(J) , J )), q_dot)
 
