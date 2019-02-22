@@ -39,6 +39,7 @@ class GoalManager
         Eigen::VectorXf apples_; // state for the kalman filter
         int state_size_;
         Eigen::VectorXf apples_observations_;
+        bool init_update_= true;
 
         geometry_msgs::Point goal_;
         std::vector<float> apples_array_;
