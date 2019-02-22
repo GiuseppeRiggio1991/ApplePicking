@@ -31,6 +31,8 @@ from task_planner.srv import *
 import pyquaternion
 import socket
 
+SEQUENCING_TYPE = 'fredsmp'
+
 class SawyerPlanner:
 
     def __init__(self, sim=False):
@@ -106,7 +108,7 @@ class SawyerPlanner:
         self.gripper_client = rospy.ServiceProxy('/gripper_action', SetBool)
         self.apple_check_client = rospy.ServiceProxy("/sawyer_planner/apple_check", AppleCheck)
         self.start_pipeline_client = rospy.ServiceProxy("/sawyer_planner/start_pipeline", Trigger)
-        # self.plan_pose_client = rospy.ServiceProxy("/plan_pose_srv", PlanPose)
+        self.plan_pose_client = rospy.ServiceProxy("/plan_pose_srv", PlanPose)
         self.optimise_offset_client = rospy.ServiceProxy("/optimise_offset_srv", OptimiseTrajectory)
         self.optimise_trajectory_client = rospy.ServiceProxy("/optimise_trajectory_srv", OptimiseTrajectory)
         self.sequencer_client = rospy.ServiceProxy("/sequence_tasks_srv", SequenceTasks)
@@ -500,7 +502,7 @@ class SawyerPlanner:
             pose_msg.position.y = pose[5]
             pose_msg.position.z = pose[6]
             tasks_msg.poses.append(pose_msg)
-        resp = self.sequencer_client.call(tasks_msg)
+        resp = self.sequencer_client.call(tasks_msg, SEQUENCING_TYPE)
         self.sequenced_goals = [goals[i] for i in resp.sequence]
         self.sequenced_trajectories = resp.database_trajectories
         self.num_goals_history = len(self.sequenced_goals)
@@ -788,7 +790,11 @@ class SawyerPlanner:
         plan_pose_msg.orientation.z = -0.5
         plan_pose_msg.orientation.w = 0.5
         # resp = self.plan_pose_client(plan_pose_msg, ignore_trellis)
-        resp = self.optimise_offset_client(self.sequenced_trajectories[0])
+        # resp = self.optimise_offset_client(self.sequenced_trajectories[0])
+        if SEQUENCING_TYPE == 'fredsmp':
+            resp = self.optimise_offset_client(self.sequenced_trajectories[0])
+        elif SEQUENCING_TYPE == 'euclidean':
+            resp = self.plan_pose_client(plan_pose_msg, ignore_trellis)
 
         if not resp.success:
             rospy.logwarn("planning to next target failed")
