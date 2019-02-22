@@ -12,6 +12,7 @@ from openravepy.misc import InitOpenRAVELogging
 from prpy.planning.cbirrt import CBiRRTPlanner
 from copy import *
 import csv
+import json
 
 import rospy
 import rospkg
@@ -34,6 +35,7 @@ import pyquaternion
 import socket
 
 LOGGING = True
+SEQUENCING_TYPE = 'euclidean'
 
 class SawyerPlanner:
 
@@ -110,7 +112,7 @@ class SawyerPlanner:
         self.gripper_client = rospy.ServiceProxy('/gripper_action', SetBool)
         self.apple_check_client = rospy.ServiceProxy("/sawyer_planner/apple_check", AppleCheck)
         self.start_pipeline_client = rospy.ServiceProxy("/sawyer_planner/start_pipeline", Trigger)
-        # self.plan_pose_client = rospy.ServiceProxy("/plan_pose_srv", PlanPose)
+        self.plan_pose_client = rospy.ServiceProxy("/plan_pose_srv", PlanPose)
         self.optimise_offset_client = rospy.ServiceProxy("/optimise_offset_srv", OptimiseTrajectory)
         self.optimise_trajectory_client = rospy.ServiceProxy("/optimise_trajectory_srv", OptimiseTrajectory)
         self.sequencer_client = rospy.ServiceProxy("/sequence_tasks_srv", SequenceTasks)
@@ -139,13 +141,22 @@ class SawyerPlanner:
             # self.goal_array = [[0.8, 0.0, 0.2]] # planner fails
             # self.goal_array = [[ 0.95,        0.30172234,  0.6943676 ]]  # joint limits
 
-            random.seed(time.time())
+            # random.seed(time.time())
+            # self.goal_array = []
+            # for i in range(3):
+            #     rand_x = random.uniform(0.8, 0.9)
+            #     rand_y = random.uniform(-0.35, 0.35)
+            #     rand_z = random.uniform(0.2, 0.7)
+            #     self.goal_array.append([rand_x, rand_y, rand_z])
+
             self.goal_array = []
-            for i in range(3):
-                rand_x = random.uniform(0.8, 0.9)
-                rand_y = random.uniform(-0.35, 0.35)
-                rand_z = random.uniform(0.2, 0.7)
-                self.goal_array.append([rand_x, rand_y, rand_z])
+            x_array = [0.9]
+            y_array = [-0.35, 0.0, 0.35]
+            z_array = [0.2, 0.45, 0.7]
+            for x in x_array:
+                for y in y_array:
+                    for z in z_array:
+                        self.goal_array.append([x, y, z])
 
 
             #self.goal_array = []
@@ -192,8 +203,8 @@ class SawyerPlanner:
             self.results_filename = self.directory + 'results_' + time.strftime("%Y%m%d-%H%M%S")
             self.fails_filename = self.directory + 'fails_' + time.strftime("%Y%m%d-%H%M%S")
             # self.results_table = []
-        self.results_dict = {'Sequencing Time':0.0, 'Planner Time':0.0, 'Approach Time':0.0, 'Num Apples':0}
-        self.failures_dict = {'Joint Limits':0, 'Low Manip':0, 'Planner': 0, 'Grasp Misalignment':0, 'Grasp Obstructed':0}
+        self.results_dict = {'Sequencing Time':[], 'Planner Time':[], 'Approach Time':[], 'Num Apples':0}
+        self.failures_dict = {'Joint Limits':[], 'Low Manip':[], 'Planner': [], 'Grasp Misalignment':[], 'Grasp Obstructed':[]}
 
         self.state = self.STATE.SEARCH
 
@@ -275,15 +286,19 @@ class SawyerPlanner:
 
     def save_logs(self):
         if LOGGING:
-            results_filename = self.directory + 'results_' + time.strftime("%Y%m%d-%H%M%S")
-            fails_filename = self.directory + 'fails_' + time.strftime("%Y%m%d-%H%M%S")
+            results_filename = self.directory + '/results_' + time.strftime("%Y%m%d-%H%M%S")
+            fails_filename = self.directory + '/fails_' + time.strftime("%Y%m%d-%H%M%S")
 
-            w = csv.writer(open(results_filename, "w"))
-            for key, val in self.results_dict.items():
-                w.writerow([key, val])
-            w = csv.writer(open(fails_filename, "w"))
-            for key, val in self.failures_dict.items():
-                w.writerow([key, val])
+            with open(results_filename, 'w') as outfile:
+                json.dump(self.results_dict, outfile)
+            with open(fails_filename, 'w') as outfile:
+                json.dump(self.failures_dict, outfile)
+            # w = csv.writer(open(results_filename, "w"))
+            # for key, val in self.results_dict.items():
+            #     w.writerow([key, val])
+            # w = csv.writer(open(fails_filename, "w"))
+            # for key, val in self.failures_dict.items():
+            #     w.writerow([key, val])
 
     def update(self):
 
@@ -316,8 +331,10 @@ class SawyerPlanner:
                 rospy.logerr("There are no apples to pick!")
                 sys.exit()
 
-            self.results_dict['Sequencing Time'] += elapsed_time
+            self.results_dict['Sequencing Time'].append(elapsed_time)
             self.results_dict['Num Apples'] += 1
+            self.failures_dict['Grasp Misalignment'].append(0)
+            self.failures_dict['Grasp Obstructed'].append(0)
 
             # if self.sim:
             #     resp = self.optimise_trajectory_client(self.sequenced_trajectories[0])
@@ -328,14 +345,16 @@ class SawyerPlanner:
             time_start = rospy.get_time()
             plan_success = self.plan_to_goal(self.starting_position, self.starting_direction, 0.0)
             elapsed_time = rospy.get_time() - time_start
-            self.results_dict['Planner Time'] += elapsed_time
             # print("self.goal: " + str(self.goal))
             # raw_input('press enter to continue...')
 
             if plan_success:
                 self.state = self.STATE.APPROACH
+                self.results_dict['Planner Time'].append(elapsed_time)
+                self.failures_dict['Planner'].append(0)
             else:
-                self.failures_dict['Planner'] += 1
+                self.failures_dict['Planner'].append(1)
+                self.results_dict['Planner Time'].append(numpy.nan)
                 rospy.logerr('plan failed, going to next...')
                 self.remove_current_apple()
                 self.state = self.STATE.TO_NEXT
@@ -370,13 +389,25 @@ class SawyerPlanner:
             self.recovery_trajectory = []
 
             time_start = rospy.get_time()
-            if self.go_to_goal([None], numpy.array([1.0, 0.0, 0.0]), self.go_to_goal_offset):
+            status = self.go_to_goal([None], numpy.array([1.0, 0.0, 0.0]), self.go_to_goal_offset)
+            elapsed_time = rospy.get_time() - time_start
+            if status == 0:
                 self.state = self.STATE.GRAB
-            else:
+                self.results_dict['Approach Time'].append(elapsed_time)
+                self.failures_dict['Joint Limits'].append(0)
+                self.failures_dict['Low Manip'].append(0)
+            elif status == 1:
+                self.results_dict['Approach Time'].append(numpy.nan)
+                self.failures_dict['Joint Limits'].append(1)
+                self.failures_dict['Low Manip'].append(0)
                 self.remove_current_apple()
                 self.state = self.STATE.RECOVER
-            elapsed_time = rospy.get_time() - time_start
-            self.results_dict['Approach Time'] += elapsed_time
+            elif status == 2:
+                self.results_dict['Approach Time'].append(numpy.nan)
+                self.failures_dict['Low Manip'].append(1)
+                self.failures_dict['Joint Limits'].append(0)
+                self.remove_current_apple()
+                self.state = self.STATE.RECOVER
                 # blacklist_goal_srv(self.goal)
 
                 # self.state = self.STATE.TO_DROP
@@ -546,7 +577,7 @@ class SawyerPlanner:
             pose_msg.position.y = pose[5]
             pose_msg.position.z = pose[6]
             tasks_msg.poses.append(pose_msg)
-        resp = self.sequencer_client.call(tasks_msg)
+        resp = self.sequencer_client.call(tasks_msg, SEQUENCING_TYPE)
         self.sequenced_goals = [goals[i] for i in resp.sequence]
         self.sequenced_trajectories = resp.database_trajectories
         self.num_goals_history = len(self.sequenced_goals)
@@ -598,7 +629,7 @@ class SawyerPlanner:
                 for i in range(len(goal_array_1D) / 3):
                     goal_array.append(numpy.array(goal_array_1D[3 * i: 3 * i + 3]) - self.apple_offset)
             self.goal_array = goal_array
-            print("goal_array: " + str(self.goal_array))
+            rospy.loginfo_throttle(1, "goal_array: " + str(self.goal_array))
 
             if len(self.sequenced_goals):
                 min_dist = numpy.inf
@@ -617,7 +648,7 @@ class SawyerPlanner:
 
                     self.starting_position = self.goal - numpy.array([self.starting_position_offset, 0.0, 0.0]);
                     self.starting_direction = numpy.array([1.0, 0.0, 0.0])
-                print("goal: " + str(self.goal))
+                rospy.loginfo_throttle(1, "goal: " + str(self.goal))
 
     def get_goal(self, msg, offset = 0.08):
 
@@ -757,8 +788,7 @@ class SawyerPlanner:
             # joints = joints.values()[::-1]  # need to reverse because method's ordering is j6-j0
 
             if not self.is_in_joint_limits():
-                self.failures_dict['Joint Limits'] += 1
-                return False
+                return 1
                 # sys.exit()
 
 
@@ -780,8 +810,7 @@ class SawyerPlanner:
 
             #singularity check
             if not self.is_greater_min_manipulability():
-                self.failures_dict['Low Manip'] += 1
-                return False
+                return 2
             else:
                 joint_vel = self.compute_joint_vel(des_vel)
                 # print("joint_vel: " + str(joint_vel))
@@ -797,7 +826,7 @@ class SawyerPlanner:
             # rospy.sleep(0.1)
 
         self.stop_arm()
-        return True
+        return 0
 
 
     def plan_to_goal(self, goal = [None], to_goal = [None], offset = 0.13, ignore_trellis=False):
@@ -835,8 +864,10 @@ class SawyerPlanner:
         plan_pose_msg.orientation.y = 0.5
         plan_pose_msg.orientation.z = -0.5
         plan_pose_msg.orientation.w = 0.5
-        # resp = self.plan_pose_client(plan_pose_msg, ignore_trellis)
-        resp = self.optimise_offset_client(self.sequenced_trajectories[0])
+        if SEQUENCING_TYPE == 'fredsmp':
+            resp = self.optimise_offset_client(self.sequenced_trajectories[0])
+        elif SEQUENCING_TYPE == 'euclidean':
+            resp = self.plan_pose_client(plan_pose_msg, ignore_trellis)
 
         if not resp.success:
             rospy.logwarn("planning to next target failed")

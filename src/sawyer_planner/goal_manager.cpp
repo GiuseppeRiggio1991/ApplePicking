@@ -188,8 +188,10 @@ void GoalManager::updateGoal(const ros::TimerEvent& event)
         raw_points_pub_.publish(raw_points_msg);
 
         std::cout << "apples_.size(): " << apples_.size() << std::endl;
-        if (apples_.size() == 0)
+        if (init_update_) // had to change this because it kept adding the last apples in view again
+        // if (apples_.size() == 0)
         {
+            init_update_ = false;
             apples_.resize(cloud.size() * 3);
             state_size_ = apples_.size();
 
