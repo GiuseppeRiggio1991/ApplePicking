@@ -276,17 +276,17 @@ void GoalManager::updateGoal(const ros::TimerEvent& event)
 
                     C.block(observations.size()-3, index, 3, 3) = Eigen::Matrix3f::Identity();
                 }
-                else
-                {
-                    // no match, it is a new apple
-                    std::cout << "new apple" << std::endl;
-                    new_apples.conservativeResize(new_apples.size()+3);
+                // else
+                // {
+                //     // no match, it is a new apple
+                //     std::cout << "new apple" << std::endl;
+                //     new_apples.conservativeResize(new_apples.size()+3);
 
-                    new_apples[new_apples.size()-3] = p.x;
-                    new_apples[new_apples.size()-2] = p.y;
-                    new_apples[new_apples.size()-1] = p.z;
+                //     new_apples[new_apples.size()-3] = p.x;
+                //     new_apples[new_apples.size()-2] = p.y;
+                //     new_apples[new_apples.size()-1] = p.z;
 
-                }
+                // }
             }
 
             float obs_covariance = 0.5; // change with some parameter
