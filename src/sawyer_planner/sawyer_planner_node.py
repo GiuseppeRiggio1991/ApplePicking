@@ -25,7 +25,7 @@ from trajectory_msgs.msg import JointTrajectoryPoint
 from trajectory_msgs.msg import JointTrajectory
 from std_msgs.msg import Float32MultiArray
 from std_msgs.msg import Bool
-from std_srvs.srv import SetBool, Trigger
+from std_srvs.srv import SetBool, Trigger, Empty
 from sawyer_planner.srv import AppleCheck, AppleCheckRequest, AppleCheckResponse
 from online_planner.srv import *
 from task_planner.srv import *
@@ -35,11 +35,10 @@ import pyquaternion
 import socket
 
 LOGGING = True
-SEQUENCING_TYPE = 'euclidean'
 
 class SawyerPlanner:
 
-    def __init__(self, sim=False):
+    def __init__(self, metric, sim=False, goal_array=[], noise_array=[]):
 
         self.environment_setup()
         self.STATE = enum.Enum('STATE', 'SEARCH TO_NEXT APPROACH GRAB CHECK_GRASPING TO_DROP DROP RECOVER')
@@ -66,6 +65,8 @@ class SawyerPlanner:
         self.recovery_flag = False
         self.start_recovery_time = None
         self.recovery_trajectory = []
+
+        self.sequencing_metric = metric
 
         self.joint_limits_lower = numpy.array([-3.0503, -3.8095, -3.0426, -3.0439, -2.9761, -2.9761, -4.7124]) + self.limits_epsilon
         self.joint_limits_upper = numpy.array([3.0503, 2.2736, 3.0426, 3.0439, 2.9761, 2.9761, 4.7124]) - self.limits_epsilon
@@ -127,6 +128,9 @@ class SawyerPlanner:
         or_joints_pos = numpy.array(or_joint_states.position)
 
         if self.sim:
+            self.set_home_client = rospy.ServiceProxy('set_home_position', Empty)
+            self.set_home_client.call()
+            rospy.sleep(1.0)
             # self.apple_offset = [0.5, 0.0, 0.0]
             # self.goal_array = [[0.8, 0.3, 0.5], [0.8, -0.3, 0.5]]
             # self.goal_array = [[0.8, 0.3, 0.5]]  # bad run low manip
@@ -142,21 +146,33 @@ class SawyerPlanner:
             # self.goal_array = [[ 0.95,        0.30172234,  0.6943676 ]]  # joint limits
 
             # random.seed(time.time())
+            # # numpy.random.seed(time.time())
             # self.goal_array = []
-            # for i in range(3):
+            # for i in range(8):
             #     rand_x = random.uniform(0.8, 0.9)
             #     rand_y = random.uniform(-0.35, 0.35)
             #     rand_z = random.uniform(0.2, 0.7)
             #     self.goal_array.append([rand_x, rand_y, rand_z])
 
-            self.goal_array = []
-            x_array = [0.9]
-            y_array = [-0.35, 0.0, 0.35]
-            z_array = [0.2, 0.45, 0.7]
-            for x in x_array:
-                for y in y_array:
-                    for z in z_array:
-                        self.goal_array.append([x, y, z])
+            # # add Gaussian noise
+            # x_noise = numpy.random.normal(0.0, 0.02, len(self.goal_array))
+            # y_noise = numpy.random.normal(0.0, 0.05, len(self.goal_array))
+            # z_noise = numpy.random.normal(0.0, 0.05, len(self.goal_array))
+            # self.noise_array = numpy.vstack((x_noise, y_noise, z_noise)).transpose()
+            # rospy.loginfo("self.noise_array: ")
+            # rospy.loginfo(str(self.noise_array))
+
+            self.goal_array = copy(goal_array)
+            self.noise_array = copy(noise_array)
+
+            # self.goal_array = []
+            # x_array = [0.9]
+            # y_array = [-0.35, 0.0, 0.35]
+            # z_array = [0.2, 0.45, 0.7]
+            # for x in x_array:
+            #     for y in y_array:
+            #         for z in z_array:
+            #             self.goal_array.append([x, y, z])
 
 
             #self.goal_array = []
@@ -200,10 +216,13 @@ class SawyerPlanner:
             self.directory = rospack.get_path('sawyer_planner') + '/results'
             if not os.path.exists(self.directory):
                 os.makedirs(self.directory)
-            self.results_filename = self.directory + 'results_' + time.strftime("%Y%m%d-%H%M%S")
-            self.fails_filename = self.directory + 'fails_' + time.strftime("%Y%m%d-%H%M%S")
+            self.directory_metric = self.directory + '/' + metric
+            if not os.path.exists(self.directory_metric):
+                os.makedirs(self.directory_metric)
+            # self.results_filename = self.directory_metric + 'results_' + time.strftime("%Y%m%d-%H%M%S")
+            # self.fails_filename = self.directory_metric + 'fails_' + time.strftime("%Y%m%d-%H%M%S")
             # self.results_table = []
-        self.results_dict = {'Sequencing Time':[], 'Planner Time':[], 'Approach Time':[], 'Num Apples':0}
+        self.results_dict = {'Sequencing Time':[], 'Planner Computation Time':[], 'Planner Execution Time':[], 'Approach Time':[], 'Num Apples':0}
         self.failures_dict = {'Joint Limits':[], 'Low Manip':[], 'Planner': [], 'Grasp Misalignment':[], 'Grasp Obstructed':[]}
 
         self.state = self.STATE.SEARCH
@@ -286,8 +305,8 @@ class SawyerPlanner:
 
     def save_logs(self):
         if LOGGING:
-            results_filename = self.directory + '/results_' + time.strftime("%Y%m%d-%H%M%S")
-            fails_filename = self.directory + '/fails_' + time.strftime("%Y%m%d-%H%M%S")
+            results_filename = self.directory_metric + '/results_' + time.strftime("%Y%m%d-%H%M%S")
+            fails_filename = self.directory_metric + '/fails_' + time.strftime("%Y%m%d-%H%M%S")
 
             with open(results_filename, 'w') as outfile:
                 json.dump(self.results_dict, outfile)
@@ -329,7 +348,8 @@ class SawyerPlanner:
             if self.goal[0] == None:
                 self.save_logs()
                 rospy.logerr("There are no apples to pick!")
-                sys.exit()
+                # sys.exit()
+                return False
 
             self.results_dict['Sequencing Time'].append(elapsed_time)
             self.results_dict['Num Apples'] += 1
@@ -342,19 +362,23 @@ class SawyerPlanner:
                 
             print("starting position and direction: ")
             print(self.starting_position, self.starting_direction)
-            time_start = rospy.get_time()
-            plan_success = self.plan_to_goal(self.starting_position, self.starting_direction, 0.0)
-            elapsed_time = rospy.get_time() - time_start
+            # time_start = rospy.get_time()
+            plan_success, plan_duration, traj_duration = self.plan_to_goal(self.starting_position, self.starting_direction, 0.0)
+            # elapsed_time = rospy.get_time() - time_start
             # print("self.goal: " + str(self.goal))
             # raw_input('press enter to continue...')
 
             if plan_success:
                 self.state = self.STATE.APPROACH
-                self.results_dict['Planner Time'].append(elapsed_time)
+                # self.results_dict['Planner Time'].append(elapsed_time)
+                self.results_dict['Planner Computation Time'].append(plan_duration)
+                self.results_dict['Planner Execution Time'].append(traj_duration)
                 self.failures_dict['Planner'].append(0)
             else:
                 self.failures_dict['Planner'].append(1)
-                self.results_dict['Planner Time'].append(numpy.nan)
+                # self.results_dict['Planner Time'].append(numpy.nan)
+                self.results_dict['Planner Computation Time'].append(plan_duration)
+                self.results_dict['Planner Execution Time'].append(numpy.nan)
                 rospy.logerr('plan failed, going to next...')
                 self.remove_current_apple()
                 self.state = self.STATE.TO_NEXT
@@ -471,9 +495,10 @@ class SawyerPlanner:
                 # print ("start2: ", self.starting_position, " ", self.starting_direction)
 
                 # if not self.go_to_goal(self.starting_position, self.starting_direction, 0.0):
-                    self.save_logs()
+                    # self.save_logs()
                     rospy.logerr("could not move back to drop, don't know how to recover, exiting...")
-                    sys.exit()
+                    # sys.exit()
+                    return False
             else:
                 rospy.logwarn("arm didn't appear to move much before recovery state, continuing without recovery procedure")
 
@@ -495,18 +520,20 @@ class SawyerPlanner:
                 print("self.recovery_trajectory[-1]: " + str(self.recovery_trajectory[-1]))
                 print("self.recovery_trajectory[0]: " + str(self.recovery_trajectory[0]))
                 traj_msg = self.list_trajectory_msg(self.recovery_trajectory[::-1])
-                resp = self.optimise_trajectory_client.call(traj_msg)
+                resp = self.optimise_trajectory_client.call(traj_msg, LOGGING)
                 if not resp.success:
                 # print ("start2: ", self.starting_position, " ", self.starting_direction)
 
                 # if not self.go_to_goal(self.starting_position, self.starting_direction, 0.0):
-                    self.save_logs()
+                    # self.save_logs()
                     rospy.logerr("could not move back to drop, don't know how to recover, exiting...")
-                    sys.exit()
+                    # sys.exit()
+                    return False
             else:
-                self.save_logs()
+                # self.save_logs()
                 rospy.logwarn("arm didn't appear to move much before approaching state, shouldn't of happened when moving to drop...exiting")
-                sys.exit()
+                # sys.exit()
+                return False
 
             # print ("start2: ", self.starting_position, " ", self.starting_direction)
 
@@ -542,6 +569,7 @@ class SawyerPlanner:
 
         else:
             pass
+        return True
 
     def list_trajectory_msg(self, traj):
         traj_msg = JointTrajectory()
@@ -556,6 +584,8 @@ class SawyerPlanner:
         # print (self.goal_array)
         # print (numpy.linalg.norm(self.goal_array - goal))
         del self.goal_array[idx]
+        if self.sim:
+            self.noise_array = numpy.delete(self.noise_array, idx, 0)
         # raw_input('press_enter')
 
     def sequence_goals(self):
@@ -577,15 +607,17 @@ class SawyerPlanner:
             pose_msg.position.y = pose[5]
             pose_msg.position.z = pose[6]
             tasks_msg.poses.append(pose_msg)
-        resp = self.sequencer_client.call(tasks_msg, SEQUENCING_TYPE)
+        resp = self.sequencer_client.call(tasks_msg, self.sequencing_metric)
         self.sequenced_goals = [goals[i] for i in resp.sequence]
         self.sequenced_trajectories = resp.database_trajectories
         self.num_goals_history = len(self.sequenced_goals)
         print("sequenced goals: " + str(self.sequenced_goals))
         print("resp.sequence: " + str(resp.sequence))
         if self.sim:
+            self.sequenced_noise = [self.noise_array[i] for i in resp.sequence] # necessary so that the noise maps correctly no matter the sequence (only needed for logging)
             self.goal = numpy.array(self.sequenced_goals[0])
             self.goal_off = self.goal - self.go_to_goal_offset * self.normalize(self.goal - self.ee_position)
+            self.noise = numpy.asarray(self.sequenced_noise[0])
 
             self.starting_position = self.goal - numpy.array([self.starting_position_offset, 0.0, 0.0]);
             self.starting_direction = numpy.array([1.0, 0.0, 0.0])
@@ -744,6 +776,9 @@ class SawyerPlanner:
     def go_to_goal(self, goal = [None], to_goal = [None], offset = 0.05):
 
         if goal[0] == None:
+            # x_noise = numpy.random.normal(0.0, 0.03)
+            # y_noise = numpy.random.normal(0.0, 0.05)
+            # z_noise = numpy.random.normal(0.0, 0.05)
             goal = deepcopy(self.goal)
             self_goal = True
             rospy.loginfo("goal: " + str(goal))
@@ -768,9 +803,12 @@ class SawyerPlanner:
                 goal_off = deepcopy(self.goal_off)
                 if self.sim:
                     # update goal_off because ee_position changes
+                    goal += self.noise
                     goal_off = goal - offset * self.normalize(goal - self.ee_position)
+                    rospy.loginfo_throttle(0.2, "adding noise" + str(self.noise))
+                    rospy.loginfo_throttle(0.2, "self.noise_array" + str(self.noise_array))
                 self.recovery_trajectory.append(copy(self.manipulator_joints))
-            
+
             rospy.loginfo_throttle(0.2, "ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
             rospy.loginfo_throttle(0.2, "[distance calc] ee_position: " + str(self.ee_position))
             rospy.loginfo_throttle(0.2, "[distance calc] goal: " + str(goal))
@@ -864,10 +902,10 @@ class SawyerPlanner:
         plan_pose_msg.orientation.y = 0.5
         plan_pose_msg.orientation.z = -0.5
         plan_pose_msg.orientation.w = 0.5
-        if SEQUENCING_TYPE == 'fredsmp':
-            resp = self.optimise_offset_client(self.sequenced_trajectories[0])
-        elif SEQUENCING_TYPE == 'euclidean':
-            resp = self.plan_pose_client(plan_pose_msg, ignore_trellis)
+        if self.sequencing_metric == 'fredsmp':
+            resp = self.optimise_offset_client(self.sequenced_trajectories[0], LOGGING)
+        elif self.sequencing_metric == 'euclidean':
+            resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, LOGGING)
 
         if not resp.success:
             rospy.logwarn("planning to next target failed")
@@ -904,7 +942,7 @@ class SawyerPlanner:
             #     pass 
             rospy.sleep(1.0)
 
-        return resp.success
+        return resp.success, resp.plan_duration, resp.traj_duration
 
     def get_angular_velocity(self, goal = [None], to_goal = [None]):
         
@@ -1031,6 +1069,8 @@ class SawyerPlanner:
         # on shutdown
 
         # self.socket_handler.close()
+
+        self.stop_arm()
 
         qstart_param_name = rospy.search_param('qstart')
 

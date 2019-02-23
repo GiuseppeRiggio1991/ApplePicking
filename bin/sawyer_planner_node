@@ -4,6 +4,37 @@ import rospy
 
 from sawyer_planner import sawyer_planner_node
 import sys
+import random
+import numpy
+
+LOGGING = True
+sequencing_metrics = ['fredsmp', 'euclidean']
+# sequencing_metrics = ['fredsmp']
+num_targets = 1
+num_experiments = 2
+
+def gen_goal_and_noise_arrays(num_targets=8):
+    # random.seed(time.time())
+    # numpy.random.seed(time.time())
+    goal_array = []
+    for i in range(num_targets):
+        rand_x = random.uniform(0.8, 0.9)
+        rand_y = random.uniform(-0.35, 0.35)
+        rand_z = random.uniform(0.2, 0.7)
+        goal_array.append([rand_x, rand_y, rand_z])
+
+    # add Gaussian noise
+    x_noise = numpy.random.normal(0.0, 0.02, len(goal_array))
+    y_noise = numpy.random.normal(0.0, 0.05, len(goal_array))
+    z_noise = numpy.random.normal(0.0, 0.05, len(goal_array))
+    noise_array = numpy.vstack((x_noise, y_noise, z_noise)).transpose()
+    # rospy.loginfo("noise_array: ")
+    # rospy.loginfo(str(noise_array))
+
+    # goal_array_copy = copy(goal_array)
+    # noise_array_copy = copy(noise_array)
+    return goal_array, noise_array
+
 
 if __name__ == "__main__":
 
@@ -13,13 +44,27 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         if sys.argv[1] == 'sim':
             sim = True
-    planner = sawyer_planner_node.SawyerPlanner(sim)
 
-    while not rospy.is_shutdown():
-        # print(planner.goal_array)
-        # planner.sequence_goals()
-        planner.update()
+    if LOGGING:
+        for i in range(num_experiments):
+            rospy.loginfo("STARTING EXPERIMENT " + str(i))
+            goal_array, noise_array = gen_goal_and_noise_arrays(num_targets)
+            for metric in sequencing_metrics:
+                still_running = True
+                planner = sawyer_planner_node.SawyerPlanner(metric, sim, goal_array, noise_array)
+                while still_running and not rospy.is_shutdown():
+                    # print(planner.goal_array)
+                    # planner.sequence_goals()
+                    still_running = planner.update()
 
-        rate.sleep()
+                    rate.sleep()
+    else:
+        while still_running and not rospy.is_shutdown():
+            # print(planner.goal_array)
+            # planner.sequence_goals()
+            still_running = planner.update()
+
+            rate.sleep()
+
 
     rospy.on_shutdown(planner.clean)
