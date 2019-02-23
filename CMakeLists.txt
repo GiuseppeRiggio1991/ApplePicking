@@ -174,6 +174,9 @@ target_link_libraries(hydra_bridge_node ${catkin_LIBRARIES} ${PCL_LIBRARIES})
 add_executable(KF_test_node src/sawyer_planner/KF_test_node.cpp src/sawyer_planner/kalman_filter.cpp src/sawyer_planner/linear_model.cpp)
 target_link_libraries(KF_test_node ${catkin_LIBRARIES} ${PCL_LIBRARIES})
 
+add_executable(fake_apples_node src/sawyer_planner/fake_apples.cpp)
+target_link_libraries(fake_apples_node ${catkin_LIBRARIES} ${PCL_LIBRARIES})
+
 
 #############
 ## Install ##

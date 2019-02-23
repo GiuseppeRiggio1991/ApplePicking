@@ -36,6 +36,11 @@ class GoalManager
 
         KalmanFilter kf_;
 
+        // parameters
+        float covariance_;
+        float obs_covariance_;
+        float me_covariance_;
+
         Eigen::VectorXf apples_; // state for the kalman filter
         int state_size_;
         Eigen::VectorXf apples_observations_;
