@@ -45,19 +45,22 @@ if __name__ == "__main__":
         if sys.argv[1] == 'sim':
             sim = True
 
+    last_joints = []
+
     if LOGGING:
         for i in range(num_experiments):
             rospy.loginfo("STARTING EXPERIMENT " + str(i))
             goal_array, noise_array = gen_goal_and_noise_arrays(num_targets)
             for metric in sequencing_metrics:
                 still_running = True
-                planner = sawyer_planner_node.SawyerPlanner(metric, sim, goal_array, noise_array)
+                planner = sawyer_planner_node.SawyerPlanner(metric, sim, goal_array, noise_array, last_joints)
                 while still_running and not rospy.is_shutdown():
                     # print(planner.goal_array)
                     # planner.sequence_goals()
                     still_running = planner.update()
 
                     rate.sleep()
+            last_joints = planner.manipulator_joints
     else:
         while still_running and not rospy.is_shutdown():
             # print(planner.goal_array)

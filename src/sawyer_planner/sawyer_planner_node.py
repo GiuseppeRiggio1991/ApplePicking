@@ -29,6 +29,7 @@ from std_srvs.srv import SetBool, Trigger, Empty
 from sawyer_planner.srv import AppleCheck, AppleCheckRequest, AppleCheckResponse
 from online_planner.srv import *
 from task_planner.srv import *
+from localisation.srv import *
 # from task_planner.msgs import *
 
 import pyquaternion
@@ -38,7 +39,7 @@ LOGGING = True
 
 class SawyerPlanner:
 
-    def __init__(self, metric, sim=False, goal_array=[], noise_array=[]):
+    def __init__(self, metric, sim=False, goal_array=[], noise_array=[], last_joints=[]):
 
         self.environment_setup()
         self.STATE = enum.Enum('STATE', 'SEARCH TO_NEXT APPROACH GRAB CHECK_GRASPING TO_DROP DROP RECOVER')
@@ -117,6 +118,7 @@ class SawyerPlanner:
         self.optimise_offset_client = rospy.ServiceProxy("/optimise_offset_srv", OptimiseTrajectory)
         self.optimise_trajectory_client = rospy.ServiceProxy("/optimise_trajectory_srv", OptimiseTrajectory)
         self.sequencer_client = rospy.ServiceProxy("/sequence_tasks_srv", SequenceTasks)
+        self.set_robot_joints = rospy.ServiceProxy('set_robot_joints', SetRobotJoints)
 
         time.sleep(0.5)
         
@@ -128,8 +130,13 @@ class SawyerPlanner:
         or_joints_pos = numpy.array(or_joint_states.position)
 
         if self.sim:
-            self.set_home_client = rospy.ServiceProxy('set_home_position', Empty)
-            self.set_home_client.call()
+            if len(last_joints):
+                joint_msg = JointState()
+                joint_msg.position = last_joints
+                self.set_robot_joints(joint_msg)
+            else:
+                self.set_home_client = rospy.ServiceProxy('set_home_position', Empty)
+                self.set_home_client.call()
             rospy.sleep(1.0)
             # self.apple_offset = [0.5, 0.0, 0.0]
             # self.goal_array = [[0.8, 0.3, 0.5], [0.8, -0.3, 0.5]]
