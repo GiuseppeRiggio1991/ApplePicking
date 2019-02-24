@@ -490,7 +490,7 @@ class SawyerPlanner:
                 print("self.recovery_trajectory[-1]: " + str(self.recovery_trajectory[-1]))
                 print("self.recovery_trajectory[0]: " + str(self.recovery_trajectory[0]))
                 traj_msg = self.list_trajectory_msg(self.recovery_trajectory[::-1])
-                resp = self.optimise_trajectory_client.call(traj_msg)
+                resp = self.optimise_trajectory_client.call(traj_msg, LOGGING)
                 if not resp.success:
                 # print ("start2: ", self.starting_position, " ", self.starting_direction)
 
