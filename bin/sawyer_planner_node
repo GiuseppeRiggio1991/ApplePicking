@@ -47,7 +47,8 @@ if __name__ == "__main__":
 
     last_joints = []
 
-    if LOGGING:
+    still_running = True
+    if LOGGING and sim:
         for i in range(num_experiments):
             rospy.loginfo("STARTING EXPERIMENT " + str(i))
             goal_array, noise_array = gen_goal_and_noise_arrays(num_targets)
@@ -62,6 +63,8 @@ if __name__ == "__main__":
                     rate.sleep()
             last_joints = planner.manipulator_joints
     else:
+        metric = 'euclidean'
+        planner = sawyer_planner_node.SawyerPlanner(metric, sim)
         while still_running and not rospy.is_shutdown():
             # print(planner.goal_array)
             # planner.sequence_goals()

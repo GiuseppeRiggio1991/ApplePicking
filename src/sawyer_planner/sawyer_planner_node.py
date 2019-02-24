@@ -910,9 +910,9 @@ class SawyerPlanner:
         plan_pose_msg.orientation.z = -0.5
         plan_pose_msg.orientation.w = 0.5
         if self.sequencing_metric == 'fredsmp':
-            resp = self.optimise_offset_client(self.sequenced_trajectories[0], LOGGING)
+            resp = self.optimise_offset_client(self.sequenced_trajectories[0], not self.sim)
         elif self.sequencing_metric == 'euclidean':
-            resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, LOGGING)
+            resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, not self.sim)
 
         if not resp.success:
             rospy.logwarn("planning to next target failed")

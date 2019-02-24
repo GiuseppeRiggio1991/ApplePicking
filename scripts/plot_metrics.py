@@ -9,8 +9,8 @@ import os
 # self.results_dict = {'Sequencing Time':[], 'Planner Computation Time':[], 'Planner Execution Time':[], 'Approach Time':[], 'Num Apples':0}
 # self.failures_dict = {'Joint Limits':[], 'Low Manip':[], 'Planner': [], 'Grasp Misalignment':[], 'Grasp Obstructed':[]}
 
-eucl_dir = '/home/fred/hydra_ws/src/sawyer_planner/results/euclidean'
-fred_dir = '/home/fred/hydra_ws/src/sawyer_planner/results/fredsmp'
+eucl_dir = '/home/planner/hydra_ws/src/sawyer_planner/results/euclidean'
+fred_dir = '/home/planner/hydra_ws/src/sawyer_planner/results/fredsmp'
 
 dirs_array = [eucl_dir, fred_dir]
 planner_times_arr = []
