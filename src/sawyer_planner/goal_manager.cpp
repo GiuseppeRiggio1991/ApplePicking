@@ -16,14 +16,50 @@ GoalManager::GoalManager()
     pcl_client_ = nh_.serviceClient<hydra_utils::CloudService>("/left_arm/mvps/segmentation_module/spheres"); 
 
     state_size_ = 0;
+
+    // get params
+    ros::NodeHandle nh("~");
+    if (nh.hasParam("initial_covariance"))
+        nh.getParam("initial_covariance", covariance_);
+    else
+    {
+        ROS_WARN("initial covariance is not set! Using default!");
+        covariance_ = 0.5f;
+    }
+
+    if (nh.hasParam("obs_covariance"))
+        nh.getParam("obs_covariance", obs_covariance_);
+    else
+    {
+        ROS_WARN("observation covariance is not set! Using default!");
+        obs_covariance_ = 0.1f;
+    }
+
+    if (nh.hasParam("model_covariance"))
+        nh.getParam("model_covariance", me_covariance_);
+    else
+    {
+        ROS_WARN("model covariance is not set! Using default!");
+        me_covariance_ = 0.0f;
+    }
 }
 
 GoalManager::~GoalManager()
 {
+
+    ros::NodeHandle nh("~");
+    if (nh.hasParam("initial_covariance"))
+        nh.deleteParam("initial_covariance");
+    if (nh.hasParam("obs_covariance"))
+        nh.deleteParam("obs_covariance");
+    if (nh.hasParam("model_covariance"))
+        nh.deleteParam("model_covariance");
 }
 
-bool GoalManager::removeApple(int apple_index){
+bool GoalManager::removeApple(int apple_index)
+{
     Eigen::MatrixXf covariance = kf_.getCovariance();
+    Eigen::MatrixXf me_covariance = kf_.getModelErrorCovariance();
 
     // remove from the state
     if (apples_.size() > 3)
@@ -34,13 +70,16 @@ bool GoalManager::removeApple(int apple_index){
 
             // remove row
             covariance.block(apple_index, 0, covariance.rows() - 3 - apple_index, covariance.cols()) = covariance.block(apple_index + 3, 0, covariance.rows() - apple_index - 3, covariance.cols());
+            me_covariance.block(apple_index, 0, me_covariance.rows() - 3 - apple_index, me_covariance.cols()) = me_covariance.block(apple_index + 3, 0, me_covariance.rows() - apple_index - 3, me_covariance.cols());
 
             // remove column
             covariance.block(0, apple_index, covariance.rows(), covariance.cols() - 3 - apple_index) = covariance.block(0, apple_index + 3, covariance.rows(), covariance.cols() - apple_index - 3);
+            me_covariance.block(0, apple_index, me_covariance.rows(), me_covariance.cols() - 3 - apple_index) = me_covariance.block(0, apple_index + 3, me_covariance.rows(), me_covariance.cols() - apple_index - 3);
 
             // reshape
             apples_.conservativeResize(apples_.size() - 3);
             covariance.conservativeResize(covariance.rows() - 3, covariance.cols() - 3);
+            me_covariance.conservativeResize(me_covariance.rows() - 3, me_covariance.cols() - 3);
         }else{
             ROS_WARN("tried to remove apple from the state that doesn't exist");
             return false;
@@ -50,6 +89,7 @@ bool GoalManager::removeApple(int apple_index){
     {
         apples_.resize(0);
         covariance.resize(0, 0);
+        me_covariance.resize(0, 0);
     }
 
     state_size_ = apples_.size();
@@ -58,6 +98,7 @@ bool GoalManager::removeApple(int apple_index){
     LinearModel model(A, C); // it doesn't really matter to update C
     kf_.setModel(model);
     kf_.setInitialStateAndCovariance(apples_, covariance);
+    kf_.setModelErrorCovariance(me_covariance);
 
     ROS_INFO("Removed from the state");
     return true;
@@ -205,9 +246,12 @@ void GoalManager::updateGoal(const ros::TimerEvent& event)
             }
 
             // create initial covariance matrix assuming diagonal matrix
-            float covariance = 0.5; // change with some parameter
-            Eigen::VectorXf covariance_vector = covariance * Eigen::VectorXf::Ones(state_size_);
+            Eigen::VectorXf covariance_vector = covariance_ * Eigen::VectorXf::Ones(state_size_);
             Eigen::MatrixXf covariance_matrix = covariance_vector.asDiagonal();
+
+            Eigen::VectorXf me_covariance_vector = me_covariance_ * Eigen::VectorXf::Ones(state_size_);
+            Eigen::MatrixXf me_covariance_matrix = me_covariance_vector.asDiagonal();
+
 
             // create the model
             //   _
@@ -221,6 +265,7 @@ void GoalManager::updateGoal(const ros::TimerEvent& event)
             LinearModel model(A, C);
             kf_.setModel(model);
             kf_.setInitialStateAndCovariance(apples_, covariance_matrix);
+            kf_.setModelErrorCovariance(me_covariance_matrix);
         }
         else
         {
@@ -291,8 +336,7 @@ void GoalManager::updateGoal(const ros::TimerEvent& event)
                 // }
             }
 
-            float obs_covariance = 0.5; // change with some parameter
-            Eigen::VectorXf obs_covariance_vector = obs_covariance * Eigen::VectorXf::Ones(observations.size());
+            Eigen::VectorXf obs_covariance_vector = obs_covariance_ * Eigen::VectorXf::Ones(observations.size());
             Eigen::MatrixXf observation_covariance = obs_covariance_vector.asDiagonal();
 
             LinearModel model = kf_.getCurrentModel();
@@ -310,11 +354,20 @@ void GoalManager::updateGoal(const ros::TimerEvent& event)
             apples_.block(state_size_, 0, new_apples.size(), 1) = new_apples;
 
             Eigen::MatrixXf state_covariance = kf_.getCovariance();
-            float covariance = 0.5; // change with some parameter
             Eigen::VectorXf covariance_vector = state_covariance.diagonal();
             covariance_vector.conservativeResize(apples_.size());
-            covariance_vector.block(state_size_, 0, new_apples.size(), 1) = covariance * Eigen::VectorXf::Ones(new_apples.size());
+            covariance_vector.block(state_size_, 0, new_apples.size(), 1) = covariance_ * Eigen::VectorXf::Ones(new_apples.size());
             Eigen::MatrixXf covariance_matrix = covariance_vector.asDiagonal();
+
+
+            Eigen::MatrixXf current_me_covariance = kf_.getModelErrorCovariance();
+            Eigen::VectorXf me_covariance_vector = current_me_covariance.diagonal();
+            me_covariance_vector.conservativeResize(apples_.size());
+            me_covariance_vector.block(state_size_, 0, new_apples.size(), 1) = me_covariance_ * Eigen::VectorXf::Ones(new_apples.size());
+
+            Eigen::MatrixXf me_covariance_matrix = me_covariance_vector.asDiagonal();
+
+            
 
             C.conservativeResize(observations.size(), apples_.size());
             C.block(0, state_size_, observations.size(), new_apples.size()) = Eigen::MatrixXf::Zero(observations.size(), new_apples.size());
@@ -325,6 +378,7 @@ void GoalManager::updateGoal(const ros::TimerEvent& event)
             model.setMatrices(A, C); // it doesn't really matter to update C
             kf_.setModel(model);
             kf_.setInitialStateAndCovariance(apples_, covariance_matrix);
+            kf_.setModelErrorCovariance(me_covariance_matrix);
              
        }
 

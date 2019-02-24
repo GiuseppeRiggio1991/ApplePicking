@@ -614,6 +614,7 @@ class SawyerPlanner:
             pose_msg.position.y = pose[5]
             pose_msg.position.z = pose[6]
             tasks_msg.poses.append(pose_msg)
+
         resp = self.sequencer_client.call(tasks_msg, self.sequencing_metric)
         self.sequenced_goals = [goals[i] for i in resp.sequence]
         self.sequenced_trajectories = resp.database_trajectories
@@ -909,6 +910,7 @@ class SawyerPlanner:
         plan_pose_msg.orientation.y = 0.5
         plan_pose_msg.orientation.z = -0.5
         plan_pose_msg.orientation.w = 0.5
+
         if self.sequencing_metric == 'fredsmp':
             resp = self.optimise_offset_client(self.sequenced_trajectories[0], not self.sim)
         elif self.sequencing_metric == 'euclidean':

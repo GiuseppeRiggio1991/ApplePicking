@@ -64,6 +64,12 @@ void KalmanFilter::setModelErrorCovariance(Eigen::MatrixXf &model_covariance)
     model_error_covariance_ = model_covariance;
 }
 
+Eigen::MatrixXf KalmanFilter::getModelErrorCovariance()
+{
+    return model_error_covariance_;
+}
+
+
 LinearModel KalmanFilter::getCurrentModel()
 {
     return model_;

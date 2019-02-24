@@ -21,6 +21,7 @@ class KalmanFilter
         Eigen::MatrixXf getCovariance();
         void setModel(LinearModel &model);
         void setModelErrorCovariance(Eigen::MatrixXf &model_covariance);
+        Eigen::MatrixXf getModelErrorCovariance();
         LinearModel getCurrentModel();
         bool estimate(Eigen::VectorXf &observations, Eigen::MatrixXf &observation_covariance); // autonomous system
         bool estimate(Eigen::VectorXf &observations, Eigen::MatrixXf &observation_covariance, Eigen::VectorXf &input);
