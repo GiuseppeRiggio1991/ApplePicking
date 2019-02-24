@@ -795,7 +795,7 @@ class SawyerPlanner:
                 goal_off = goal - offset * self.normalize(to_goal)
 
         while numpy.linalg.norm(goal_off - self.ee_position) > 0.01 and not rospy.is_shutdown():
-            rospy.loginfo_throttle(0.2, "goal_off: " + str(goal_off))
+            rospy.loginfo_throttle(0.5, "goal_off: " + str(goal_off))
             # print("ee_position: " + str(self.ee_position))
             #print("ee_orientation: " + str(self.ee_orientation))
             if (self_goal):  # means servo'ing to a dynamic target
@@ -805,16 +805,16 @@ class SawyerPlanner:
                     # update goal_off because ee_position changes
                     goal += self.noise
                     goal_off = goal - offset * self.normalize(goal - self.ee_position)
-                    rospy.loginfo_throttle(0.2, "adding noise" + str(self.noise))
-                    rospy.loginfo_throttle(0.2, "self.noise_array" + str(self.noise_array))
+                    rospy.loginfo_throttle(0.5, "adding noise" + str(self.noise))
+                    rospy.loginfo_throttle(0.5, "self.noise_array" + str(self.noise_array))
                 self.recovery_trajectory.append(copy(self.manipulator_joints))
 
-            rospy.loginfo_throttle(0.2, "ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
-            rospy.loginfo_throttle(0.2, "[distance calc] ee_position: " + str(self.ee_position))
-            rospy.loginfo_throttle(0.2, "[distance calc] goal: " + str(goal))
+            rospy.loginfo_throttle(0.5, "ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
+            rospy.loginfo_throttle(0.5, "[distance calc] ee_position: " + str(self.ee_position))
+            rospy.loginfo_throttle(0.5, "[distance calc] goal: " + str(goal))
 
             if numpy.linalg.norm(self.ee_position - self.goal) < 0.3:  # 0.2m min range on sr300 and +0.1 to account for camera frame offset from EE
-                rospy.loginfo_throttle(0.2, "disabling updating of apple position because too close")
+                rospy.loginfo_throttle(0.5, "disabling updating of apple position because too close")
                 if not self.sim:
                     self.enable_bridge_pub.publish(Bool(False))
             else:

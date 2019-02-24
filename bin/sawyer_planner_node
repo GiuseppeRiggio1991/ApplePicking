@@ -10,8 +10,8 @@ import numpy
 LOGGING = True
 sequencing_metrics = ['fredsmp', 'euclidean']
 # sequencing_metrics = ['fredsmp']
-num_targets = 1
-num_experiments = 2
+num_targets = 8
+num_experiments = 20
 
 def gen_goal_and_noise_arrays(num_targets=8):
     # random.seed(time.time())
@@ -24,7 +24,7 @@ def gen_goal_and_noise_arrays(num_targets=8):
         goal_array.append([rand_x, rand_y, rand_z])
 
     # add Gaussian noise
-    x_noise = numpy.random.normal(0.0, 0.02, len(goal_array))
+    x_noise = numpy.random.normal(0.1, 0.05, len(goal_array))
     y_noise = numpy.random.normal(0.0, 0.05, len(goal_array))
     z_noise = numpy.random.normal(0.0, 0.05, len(goal_array))
     noise_array = numpy.vstack((x_noise, y_noise, z_noise)).transpose()
