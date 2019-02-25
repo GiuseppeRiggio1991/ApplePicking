@@ -69,8 +69,8 @@ class SawyerPlanner:
 
         self.sequencing_metric = metric
 
-        self.joint_limits_lower = numpy.array([-3.0503, -3.8095, -3.0426, -3.0439, -2.9761, -2.9761, -4.7124]) + self.limits_epsilon
-        self.joint_limits_upper = numpy.array([3.0503, 2.2736, 3.0426, 3.0439, 2.9761, 2.9761, 4.7124]) - self.limits_epsilon
+        self.joint_limits_lower = numpy.array([-3.0503, -3.8095, -3.0426, -3.0439, -2.9761, -2.9761, -4.7124])
+        self.joint_limits_upper = numpy.array([3.0503, 2.2736, 3.0426, 3.0439, 2.9761, 2.9761, 4.7124])
         self.joint_limits_lower_recover = numpy.array([-3.0503, -3.8095, -3.0426, -3.0439, -2.9761, -2.9761, -4.7124])
         self.joint_limits_upper_recover = numpy.array([3.0503, 2.2736, 3.0426, 3.0439, 2.9761, 2.9761, 4.7124])
 
@@ -130,7 +130,8 @@ class SawyerPlanner:
         or_joints_pos = numpy.array(or_joint_states.position)
 
         if self.sim:
-            if len(last_joints):
+            if 0:
+            # if len(last_joints):
                 joint_msg = JointState()
                 joint_msg.position = last_joints
                 self.set_robot_joints(joint_msg)
