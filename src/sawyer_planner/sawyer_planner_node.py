@@ -119,6 +119,7 @@ class SawyerPlanner:
         self.optimise_trajectory_client = rospy.ServiceProxy("/optimise_trajectory_srv", OptimiseTrajectory)
         self.sequencer_client = rospy.ServiceProxy("/sequence_tasks_srv", SequenceTasks)
         self.set_robot_joints = rospy.ServiceProxy('set_robot_joints', SetRobotJoints)
+        self.find_ik_solutions_srv = rospy.ServiceProxy('find_ik_solutions', FindIKSolutions)
 
         time.sleep(0.5)
         
@@ -582,6 +583,17 @@ class SawyerPlanner:
         else:
             pass
         return True
+
+    def pose_to_ros_msg(self, pose):
+        pose_msg = Pose()
+        pose_msg.orientation.w = pose[0]
+        pose_msg.orientation.x = pose[1]
+        pose_msg.orientation.y = pose[2]
+        pose_msg.orientation.z = pose[3]
+        pose_msg.position.x = pose[4]
+        pose_msg.position.y = pose[5]
+        pose_msg.position.z = pose[6]
+        return pose_msg
 
     def list_trajectory_msg(self, traj):
         traj_msg = JointTrajectory()
