@@ -9,8 +9,8 @@ import os
 # self.results_dict = {'Sequencing Time':[], 'Planner Computation Time':[], 'Planner Execution Time':[], 'Approach Time':[], 'Num Apples':0}
 # self.failures_dict = {'Joint Limits':[], 'Low Manip':[], 'Planner': [], 'Grasp Misalignment':[], 'Grasp Obstructed':[]}
 
-eucl_dir = '/home/planner/hydra_ws/src/sawyer_planner/results/euclidean'
-fred_dir = '/home/planner/hydra_ws/src/sawyer_planner/results/fredsmp'
+eucl_dir = '/home/planner/hydra_ws/src/sawyer_planner/results/med_noise/euclidean'
+fred_dir = '/home/planner/hydra_ws/src/sawyer_planner/results/40_offset_eucl_start/fredsmp'
 
 dirs_array = [eucl_dir, fred_dir]
 planner_times_arr = []
@@ -32,6 +32,7 @@ for dir_name in dirs_array:
             planner_times.append(results_dict['Planner Computation Time'])
             planner_executions.append(results_dict['Planner Execution Time'])
             approach_times.append(results_dict['Approach Time'])
+            print len(results_dict['Approach Time'])
         if filename.startswith("fails_"):
             json_file = os.path.join(dir_name, filename)
             with open(json_file, 'r') as f:
@@ -81,10 +82,13 @@ plt.title('Average Fails')
 
 
 plt.figure()
-appoach_times_avg = [numpy.nanmean(row) for row in approach_times_arr]
+# print approach_times_arr
+approach_times_avg = []
+for mat in approach_times_arr:
+    approach_times_avg.append(numpy.nanmean([numpy.nanmean(row) for row in mat]))
+print approach_times_avg
 # performance = [10,8,6,4,2,1]
- 
-plt.bar(y_pos, appoach_times_avg, align='center', alpha=0.5)
+plt.bar(y_pos, approach_times_avg, align='center', alpha=0.5)
 plt.xticks(y_pos, objects)
 plt.ylabel('Time (s)')
 plt.title('Average Approach Time')

@@ -6,33 +6,44 @@ from sawyer_planner import sawyer_planner_node
 import sys
 import random
 import numpy
+import openravepy
 
 LOGGING = True
-sequencing_metrics = ['fredsmp', 'euclidean']
-# sequencing_metrics = ['fredsmp']
+# sequencing_metrics = ['fredsmp', 'euclidean']
+sequencing_metrics = ['euclidean']
 num_targets = 8
 num_experiments = 20
 
-def gen_goal_and_noise_arrays(num_targets=8):
+def gen_goal_and_noise_arrays(planner, num_targets=8):
     # random.seed(time.time())
     # numpy.random.seed(time.time())
     goal_array = []
+    noise_array = []
+    solutions = []
     for i in range(num_targets):
         rand_x = random.uniform(0.8, 0.9)
         rand_y = random.uniform(-0.35, 0.35)
         rand_z = random.uniform(0.2, 0.7)
         goal_array.append([rand_x, rand_y, rand_z])
+        while len(solutions) == 0:
+            x_noise = numpy.random.normal(0.1, 0.075)
+            y_noise = numpy.random.normal(0.0, 0.075)
+            z_noise = numpy.random.normal(0.0, 0.075)
+            noisy_target = numpy.asarray(goal_array[-1] + numpy.asarray([x_noise, y_noise, z_noise]))
+            print noisy_target
+            T_robot_offset = openravepy.transformLookat(noisy_target + [0.1, 0.0, 0.0], noisy_target, [0,0,-1])
+            solutions = planner.ikmodel.manip.FindIKSolutions(
+                        T_robot_offset,
+                        openravepy.IkFilterOptions.CheckEnvCollisions)
+        solutions = []
+        noise_array.append([x_noise, y_noise, z_noise])
+    noise_array = numpy.asarray(noise_array)
 
     # add Gaussian noise
-    x_noise = numpy.random.normal(0.1, 0.05, len(goal_array))
-    y_noise = numpy.random.normal(0.0, 0.05, len(goal_array))
-    z_noise = numpy.random.normal(0.0, 0.05, len(goal_array))
-    noise_array = numpy.vstack((x_noise, y_noise, z_noise)).transpose()
-    # rospy.loginfo("noise_array: ")
-    # rospy.loginfo(str(noise_array))
-
-    # goal_array_copy = copy(goal_array)
-    # noise_array_copy = copy(noise_array)
+    # x_noise = numpy.random.normal(0.1, 0.075, len(goal_array))
+    # y_noise = numpy.random.normal(0.0, 0.075, len(goal_array))
+    # z_noise = numpy.random.normal(0.0, 0.075, len(goal_array))
+    # noise_array = numpy.vstack((x_noise, y_noise, z_noise)).transpose()
     return goal_array, noise_array
 
 
@@ -49,9 +60,10 @@ if __name__ == "__main__":
 
     still_running = True
     if LOGGING and sim:
+        planner = sawyer_planner_node.SawyerPlanner('euclidean', sim)
         for i in range(num_experiments):
             rospy.loginfo("STARTING EXPERIMENT " + str(i))
-            goal_array, noise_array = gen_goal_and_noise_arrays(num_targets)
+            goal_array, noise_array = gen_goal_and_noise_arrays(planner, num_targets)
             for metric in sequencing_metrics:
                 still_running = True
                 planner = sawyer_planner_node.SawyerPlanner(metric, sim, goal_array, noise_array, last_joints)

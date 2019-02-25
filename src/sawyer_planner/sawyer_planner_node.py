@@ -51,7 +51,7 @@ class SawyerPlanner:
         self.manipulator_joints = []
         self.num_goals_history = 0  # length of sequenced goals
         self.ee_position = None
-        self.starting_position_offset = 0.35
+        self.starting_position_offset = 0.4
         self.apple_offset = [0.0, 0.0, 0.0]
         # self.go_to_goal_offset = [0.05, 0.0, 0.0]
         self.go_to_goal_offset = 0.12  # offset from apple centre to sawyer end effector frame (not gripper)
@@ -171,6 +171,8 @@ class SawyerPlanner:
 
             self.goal_array = copy(goal_array)
             self.noise_array = copy(noise_array)
+            # self.noise_array = [[ 0.0, 0.0, 0.0]]  # joint limits
+            # self.goal_array = [[ 0.91032737, -0.07162992 , 0.18117678]]  # joint limits
 
             # self.goal_array = []
             # x_array = [0.9]
