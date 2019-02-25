@@ -66,7 +66,7 @@ class SawyerPlanner:
         self.recovery_flag = False
         self.start_recovery_time = None
         self.recovery_trajectory = []
-
+        self.current_apples_ind = -1
         self.sequencing_metric = metric
 
         self.joint_limits_lower = numpy.array([-3.0503, -3.8095, -3.0426, -3.0439, -2.9761, -2.9761, -4.7124])
@@ -348,6 +348,8 @@ class SawyerPlanner:
         elif self.state == self.STATE.TO_NEXT:
 
             rospy.loginfo("TO_NEXT")
+            self.current_apples_ind += 1
+            rospy.loginfo("current apple ind: " + str(self.current_apples_ind))
 
             # self.enable_bridge_pub.publish(Bool(True)) 
             time_start = rospy.get_time()
@@ -602,36 +604,46 @@ class SawyerPlanner:
         if not len(self.goal_array):
             self.goal = [None]
             return
-        goals = numpy.array(deepcopy(self.goal_array))
-        tasks_msg = PoseArray()
-        for goal in goals:
-            T = openravepy.transformLookat(goal + [0.1, 0.0, 0.0], goal - [self.starting_position_offset, 0.0, 0.0], [0, 0, -1])
-            T = numpy.dot(T, numpy.linalg.inv(self.T_G2EE))
-            pose = openravepy.poseFromMatrix(T)
-            pose_msg = Pose()
-            pose_msg.orientation.w = pose[0]
-            pose_msg.orientation.x = pose[1]
-            pose_msg.orientation.y = pose[2]
-            pose_msg.orientation.z = pose[3]
-            pose_msg.position.x = pose[4]
-            pose_msg.position.y = pose[5]
-            pose_msg.position.z = pose[6]
-            tasks_msg.poses.append(pose_msg)
+        if len(self.sequenced_goals) == 0:
+            goals = numpy.array(deepcopy(self.goal_array))
+            tasks_msg = PoseArray()
+            for goal in goals:
+                T = openravepy.transformLookat(goal + [0.1, 0.0, 0.0], goal - [self.starting_position_offset, 0.0, 0.0], [0, 0, -1])
+                T = numpy.dot(T, numpy.linalg.inv(self.T_G2EE))
+                pose = openravepy.poseFromMatrix(T)
+                pose_msg = Pose()
+                pose_msg.orientation.w = pose[0]
+                pose_msg.orientation.x = pose[1]
+                pose_msg.orientation.y = pose[2]
+                pose_msg.orientation.z = pose[3]
+                pose_msg.position.x = pose[4]
+                pose_msg.position.y = pose[5]
+                pose_msg.position.z = pose[6]
+                tasks_msg.poses.append(pose_msg)
 
-        resp = self.sequencer_client.call(tasks_msg, self.sequencing_metric)
-        self.sequenced_goals = [goals[i] for i in resp.sequence]
-        self.sequenced_trajectories = resp.database_trajectories
-        self.num_goals_history = len(self.sequenced_goals)
-        print("sequenced goals: " + str(self.sequenced_goals))
-        print("resp.sequence: " + str(resp.sequence))
-        if self.sim:
-            self.sequenced_noise = [self.noise_array[i] for i in resp.sequence] # necessary so that the noise maps correctly no matter the sequence (only needed for logging)
-            self.goal = numpy.array(self.sequenced_goals[0])
+            resp = self.sequencer_client.call(tasks_msg, self.sequencing_metric)
+            self.sequenced_goals = [goals[i] for i in resp.sequence]
+            self.sequenced_trajectories = resp.database_trajectories
+            self.num_goals_history = len(self.sequenced_goals)
+            print("sequenced goals: " + str(self.sequenced_goals))
+            print("resp.sequence: " + str(resp.sequence))
+            if self.sim:
+                self.sequenced_noise = [self.noise_array[i] for i in resp.sequence]   # necessary so that the noise maps correctly no matter the sequence (only needed for logging)
+        if self.sim and self.current_apples_ind < len(self.sequenced_goals):
+            self.goal = numpy.array(self.sequenced_goals[self.current_apples_ind])
             self.goal_off = self.goal - self.go_to_goal_offset * self.normalize(self.goal - self.ee_position)
-            self.noise = numpy.asarray(self.sequenced_noise[0])
+            self.noise = numpy.asarray(self.sequenced_noise[self.current_apples_ind])
 
             self.starting_position = self.goal - numpy.array([self.starting_position_offset, 0.0, 0.0]);
             self.starting_direction = numpy.array([1.0, 0.0, 0.0])
+        # else:
+        #     self.goal = numpy.array(self.sequenced_goals[self.current_apples_ind])
+        #     self.goal_off = self.goal - self.go_to_goal_offset * self.normalize(self.goal - self.ee_position)
+        #     self.noise = numpy.asarray(self.sequenced_noise[self.current_apples_ind])
+
+        #     self.starting_position = self.goal - numpy.array([self.starting_position_offset, 0.0, 0.0]);
+        #     self.starting_direction = numpy.array([1.0, 0.0, 0.0])
+
 
     def get_robot_ee_position(self, msg):
 
@@ -676,7 +688,7 @@ class SawyerPlanner:
 
             if len(self.sequenced_goals):
                 min_dist = numpy.inf
-                current_goal = self.sequenced_goals[0]
+                current_goal = self.sequenced_goals[self.current_apples_ind]
                 min_index = len(self.goal_array)
                 for it, goal in enumerate(self.goal_array):
                     dist = sum([(x - y)**2 for x, y in zip(goal, current_goal)])
@@ -806,7 +818,7 @@ class SawyerPlanner:
                 goal_off = goal - offset * self.normalize(to_goal)
 
         while numpy.linalg.norm(goal_off - self.ee_position) > 0.01 and not rospy.is_shutdown():
-            rospy.loginfo_throttle(0.5, "goal_off: " + str(goal_off))
+            # rospy.loginfo_throttle(0.5, "goal_off: " + str(goal_off))
             # print("ee_position: " + str(self.ee_position))
             #print("ee_orientation: " + str(self.ee_orientation))
             if (self_goal):  # means servo'ing to a dynamic target
@@ -816,16 +828,16 @@ class SawyerPlanner:
                     # update goal_off because ee_position changes
                     goal += self.noise
                     goal_off = goal - offset * self.normalize(goal - self.ee_position)
-                    rospy.loginfo_throttle(0.5, "adding noise" + str(self.noise))
-                    rospy.loginfo_throttle(0.5, "self.noise_array" + str(self.noise_array))
+                    # rospy.loginfo_throttle(0.5, "adding noise" + str(self.noise))
+                    # rospy.loginfo_throttle(0.5, "self.noise_array" + str(self.noise_array))
                 self.recovery_trajectory.append(copy(self.manipulator_joints))
 
-            rospy.loginfo_throttle(0.5, "ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
-            rospy.loginfo_throttle(0.5, "[distance calc] ee_position: " + str(self.ee_position))
-            rospy.loginfo_throttle(0.5, "[distance calc] goal: " + str(goal))
+            # rospy.loginfo_throttle(0.5, "ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
+            # rospy.loginfo_throttle(0.5, "[distance calc] ee_position: " + str(self.ee_position))
+            # rospy.loginfo_throttle(0.5, "[distance calc] goal: " + str(goal))
 
             if numpy.linalg.norm(self.ee_position - self.goal) < 0.3:  # 0.2m min range on sr300 and +0.1 to account for camera frame offset from EE
-                rospy.loginfo_throttle(0.5, "disabling updating of apple position because too close")
+                rospy.loginfo_throttle(1.0, "disabling updating of apple position because too close")
                 if not self.sim:
                     self.enable_bridge_pub.publish(Bool(False))
             else:
@@ -915,7 +927,7 @@ class SawyerPlanner:
         plan_pose_msg.orientation.w = 0.5
 
         if self.sequencing_metric == 'fredsmp':
-            resp = self.optimise_offset_client(self.sequenced_trajectories[0], not self.sim)
+            resp = self.optimise_offset_client(self.sequenced_trajectories[self.current_apples_ind], not self.sim)
         elif self.sequencing_metric == 'euclidean':
             resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, not self.sim)
 
@@ -924,7 +936,7 @@ class SawyerPlanner:
         else:
             # T = openravepy.transformLookat(self.sequenced_goals[0] + [0.1, 0.0, 0.0], self.sequenced_goals[0] - [self.starting_position_offset, 0.0, 0.0], [0, 0, -1])
             # T = numpy.dot(T, numpy.linalg.inv(self.T_G2EE))
-            goal_off = self.sequenced_goals[0] - [self.starting_position_offset, 0.0, 0.0]
+            goal_off = self.sequenced_goals[self.current_apples_ind] - [self.starting_position_offset, 0.0, 0.0]
             # goal_off = T[:3, 3]
         # message = "moveArm," + ",".join(map(str, goal_off_camera)) + "," + ",".join(map(str, [-0.5, 0.5, -0.5, 0.5])) + "\n"
         

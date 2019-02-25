@@ -7,12 +7,37 @@ import sys
 import random
 import numpy
 import openravepy
+import pyquaternion
 
 LOGGING = True
-# sequencing_metrics = ['fredsmp', 'euclidean']
-sequencing_metrics = ['euclidean']
+sequencing_metrics = ['fredsmp', 'euclidean']
+# sequencing_metrics = ['fredsmp']
 num_targets = 8
-num_experiments = 20
+num_experiments = 17
+
+def transform_target_start(target, planner):
+    q = pyquaternion.Quaternion(0.5, -0.5, 0.5, -0.5)
+    goal_off = target - numpy.array([planner.starting_position_offset, 0.0, 0.0])
+    # compute camera transform
+    T_EE = numpy.zeros((4, 4))
+    T_EE[:3, :3] = q.rotation_matrix
+    T_EE[:3, 3] = goal_off.transpose()
+    T_EE[3, 3] = 1.0
+
+    T_C = numpy.dot(T_EE, numpy.linalg.inv(planner.T_G2EE))
+    return T_C
+
+def transform_target_offset(target, planner):
+    q = pyquaternion.Quaternion(0.5, -0.5, 0.5, -0.5)
+    goal_off = target - numpy.array([planner.go_to_goal_offset, 0.0, 0.0])
+    # compute camera transform
+    T_EE = numpy.zeros((4, 4))
+    T_EE[:3, :3] = q.rotation_matrix
+    T_EE[:3, 3] = goal_off.transpose()
+    T_EE[3, 3] = 1.0
+
+    T_C = numpy.dot(T_EE, numpy.linalg.inv(planner.T_G2EE))
+    return T_C
 
 def gen_goal_and_noise_arrays(planner, num_targets=8):
     # random.seed(time.time())
@@ -20,23 +45,32 @@ def gen_goal_and_noise_arrays(planner, num_targets=8):
     goal_array = []
     noise_array = []
     solutions = []
-    for i in range(num_targets):
-        rand_x = random.uniform(0.8, 0.9)
-        rand_y = random.uniform(-0.35, 0.35)
-        rand_z = random.uniform(0.2, 0.7)
-        goal_array.append([rand_x, rand_y, rand_z])
+    solutions_offset = []
+    for i in range(num_targets):  # ensure target is reachable
         while len(solutions) == 0:
-            x_noise = numpy.random.normal(0.1, 0.075)
-            y_noise = numpy.random.normal(0.0, 0.075)
-            z_noise = numpy.random.normal(0.0, 0.075)
-            noisy_target = numpy.asarray(goal_array[-1] + numpy.asarray([x_noise, y_noise, z_noise]))
-            print noisy_target
-            T_robot_offset = openravepy.transformLookat(noisy_target + [0.1, 0.0, 0.0], noisy_target, [0,0,-1])
+            rand_x = random.uniform(0.8, 0.9)
+            rand_y = random.uniform(-0.35, 0.35)
+            rand_z = random.uniform(0.2, 0.7)
+            target = [rand_x, rand_y, rand_z]
+            T_robot = transform_target_start(target, planner)
             solutions = planner.ikmodel.manip.FindIKSolutions(
+                        T_robot,
+                        openravepy.IkFilterOptions.CheckEnvCollisions)
+        goal_array.append(target)
+
+        while len(solutions_offset) == 0:  # ensure noisy target is reachable
+            x_noise = numpy.random.normal(0.1, 0.05)
+            y_noise = numpy.random.normal(0.0, 0.05)
+            z_noise = numpy.random.normal(0.0, 0.05)
+            noisy_target = numpy.asarray(goal_array[-1] + numpy.asarray([x_noise, y_noise, z_noise]))
+            # print noisy_target
+            T_robot_offset = transform_target_offset(noisy_target, planner)
+            solutions_offset = planner.ikmodel.manip.FindIKSolutions(
                         T_robot_offset,
                         openravepy.IkFilterOptions.CheckEnvCollisions)
-        solutions = []
         noise_array.append([x_noise, y_noise, z_noise])
+        solutions_offset = []
+        solutions = []
     noise_array = numpy.asarray(noise_array)
 
     # add Gaussian noise

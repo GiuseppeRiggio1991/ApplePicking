@@ -9,8 +9,11 @@ import os
 # self.results_dict = {'Sequencing Time':[], 'Planner Computation Time':[], 'Planner Execution Time':[], 'Approach Time':[], 'Num Apples':0}
 # self.failures_dict = {'Joint Limits':[], 'Low Manip':[], 'Planner': [], 'Grasp Misalignment':[], 'Grasp Obstructed':[]}
 
-eucl_dir = '/home/planner/hydra_ws/src/sawyer_planner/results/med_noise/euclidean'
-fred_dir = '/home/planner/hydra_ws/src/sawyer_planner/results/40_offset_eucl_start/fredsmp'
+eucl_dir = '/home/fred/hydra_ws/src/sawyer_planner/results/high_noise/euclidean'
+fred_dir = '/home/fred/hydra_ws/src/sawyer_planner/results/fredsmp'
+
+eucl_dir = '/home/fred/hydra_ws/src/sawyer_planner/results/30_offset_home/euclidean'
+fred_dir = '/home/fred/hydra_ws/src/sawyer_planner/results/30_offset_home/fredsmp'
 
 dirs_array = [eucl_dir, fred_dir]
 planner_times_arr = []
@@ -29,8 +32,9 @@ for dir_name in dirs_array:
             json_file = os.path.join(dir_name, filename)
             with open(json_file, 'r') as f:
                 results_dict = json.load(f)
-            planner_times.append(results_dict['Planner Computation Time'])
-            planner_executions.append(results_dict['Planner Execution Time'])
+            planner_times.append(results_dict['Planner Time'])
+            # planner_times.append(results_dict['Planner Computation Time'])
+            # planner_executions.append(results_dict['Planner Execution Time'])
             approach_times.append(results_dict['Approach Time'])
             print len(results_dict['Approach Time'])
         if filename.startswith("fails_"):
