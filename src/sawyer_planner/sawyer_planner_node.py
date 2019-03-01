@@ -131,7 +131,7 @@ class SawyerPlanner:
         or_joints_pos = numpy.array(or_joint_states.position)
 
         if self.sim:
-            if 0:
+            if 1:
             # if len(last_joints):
                 joint_msg = JointState()
                 joint_msg.position = last_joints

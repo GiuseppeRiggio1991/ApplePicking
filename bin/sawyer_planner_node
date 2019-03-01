@@ -12,7 +12,7 @@ import pyquaternion
 LOGGING = True
 # sequencing_metrics = ['hybrid', 'euclidean', 'fredsmp']
 sequencing_metrics = ['fredsmp', 'euclidean']
-num_targets = 10
+num_targets = 5
 num_experiments = 20
 
 def transform_target_start(target, planner):
@@ -102,9 +102,25 @@ if __name__ == "__main__":
 
     still_running = True
     if LOGGING and sim:
-        planner = sawyer_planner_node.SawyerPlanner('euclidean', sim)
+        planner = sawyer_planner_node.SawyerPlanner('euclidean', sim)            
+        home_pose = [
+            [-0.99, 0.04, 0.13, 0.0],
+            [-0.13, -0.30, -0.94, -0.4],
+            [0.00, -0.95, 0.30, 0.85],
+            [0.00, 0.00, 0.00, 1.00]
+        ]
+        # home_pose_solutions = self.or_env.ikmodel.manip.FindIKSolutions(
+        #     home_pose, openravepy.IkFilterOptions.CheckEnvCollisions
+        # )
+        # T_robot = transform_target_start(target, planner)
+        pose_msg = planner.pose_to_ros_msg(openravepy.poseFromMatrix(home_pose))
+        resp = planner.find_ik_solutions_srv(pose_msg, False)
+        solutions = resp.solutions
+        print(solutions[0])
         for i in range(num_experiments):
             rospy.loginfo("STARTING EXPERIMENT " + str(i))
+            rand_int = random.randint(0, len(solutions) - 1)
+            last_joints = solutions[rand_int].position
             goal_array, noise_array = gen_goal_and_noise_arrays(planner, num_targets)
             for metric in sequencing_metrics:
                 rospy.loginfo("METRIC: " + metric)
@@ -116,7 +132,7 @@ if __name__ == "__main__":
                     still_running = planner.update()
 
                     rate.sleep()
-            last_joints = planner.manipulator_joints
+            # last_joints = planner.manipulator_joints
     else:
         metric = 'euclidean'
         planner = sawyer_planner_node.SawyerPlanner(metric, sim)
