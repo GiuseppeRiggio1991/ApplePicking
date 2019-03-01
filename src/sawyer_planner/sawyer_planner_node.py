@@ -69,8 +69,8 @@ class SawyerPlanner:
         self.current_apples_ind = -1
         self.sequencing_metric = metric
 
-        self.joint_limits_lower = numpy.array([-3.0503, -3.8095, -3.0426, -3.0439, -2.9761, -2.9761, -4.7124])
-        self.joint_limits_upper = numpy.array([3.0503, 2.2736, 3.0426, 3.0439, 2.9761, 2.9761, 4.7124])
+        self.joint_limits_lower = numpy.array([-3.0503, -3.8095, -3.0426, -3.0439, -2.9761, -2.9761, -4.7124]) + self.limits_epsilon
+        self.joint_limits_upper = numpy.array([3.0503, 2.2736, 3.0426, 3.0439, 2.9761, 2.9761, 4.7124]) - self.limits_epsilon
         self.joint_limits_lower_recover = numpy.array([-3.0503, -3.8095, -3.0426, -3.0439, -2.9761, -2.9761, -4.7124])
         self.joint_limits_upper_recover = numpy.array([3.0503, 2.2736, 3.0426, 3.0439, 2.9761, 2.9761, 4.7124])
 
@@ -233,7 +233,7 @@ class SawyerPlanner:
             # self.results_filename = self.directory_metric + 'results_' + time.strftime("%Y%m%d-%H%M%S")
             # self.fails_filename = self.directory_metric + 'fails_' + time.strftime("%Y%m%d-%H%M%S")
             # self.results_table = []
-        self.results_dict = {'Sequencing Time':[], 'Planner Computation Time':[], 'Planner Execution Time':[], 'Approach Time':[], 'Num Apples':0}
+        self.results_dict = {'Sequencing Time':[], 'Planner Time':[], 'Planner Computation Time':[], 'Planner Execution Time':[], 'Approach Time':[], 'Num Apples':0}
         self.failures_dict = {'Joint Limits':[], 'Low Manip':[], 'Planner': [], 'Grasp Misalignment':[], 'Grasp Obstructed':[]}
 
         self.state = self.STATE.SEARCH
@@ -381,9 +381,12 @@ class SawyerPlanner:
             # print("self.goal: " + str(self.goal))
             # raw_input('press enter to continue...')
 
+            rospy.logwarn("TRAJ DURATION: " + str(traj_duration))
             if plan_success:
                 self.state = self.STATE.APPROACH
-                # self.results_dict['Planner Time'].append(elapsed_time)
+                # self.state = self.STATE.TO_NEXT
+                # self.remove_current_apple()
+                # self.results_dict['Planner Time'].append(elapsed_time - plan_duration)
                 self.results_dict['Planner Computation Time'].append(plan_duration)
                 self.results_dict['Planner Execution Time'].append(traj_duration)
                 self.failures_dict['Planner'].append(0)
@@ -938,10 +941,10 @@ class SawyerPlanner:
         plan_pose_msg.orientation.z = -0.5
         plan_pose_msg.orientation.w = 0.5
 
-        if self.sequencing_metric == 'fredsmp':
-            resp = self.optimise_offset_client(self.sequenced_trajectories[self.current_apples_ind], not self.sim)
+        if self.sequencing_metric == 'fredsmp' or self.sequencing_metric == 'hybrid':
+            resp = self.optimise_offset_client(self.sequenced_trajectories[self.current_apples_ind], self.sim)
         elif self.sequencing_metric == 'euclidean':
-            resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, not self.sim)
+            resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, self.sim)
 
         if not resp.success:
             rospy.logwarn("planning to next target failed")
