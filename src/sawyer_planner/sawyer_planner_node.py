@@ -13,6 +13,7 @@ from prpy.planning.cbirrt import CBiRRTPlanner
 from copy import *
 import csv
 import json
+import math
 
 import rospy
 import rospkg
@@ -36,13 +37,17 @@ import pyquaternion
 import socket
 
 LOGGING = True
+CONTINUOUS_NOISE = True
+RANDOM_START = False
 
 class SawyerPlanner:
 
-    def __init__(self, metric, sim=False, goal_array=[], noise_array=[], last_joints=[]):
+    def __init__(self, metric, sim=False, goal_array=[], noise_array=[], last_joints=[], robot_name="sawyer"):
 
-        self.environment_setup()
+        self.robot_name = robot_name
+        print self.robot_name
         self.STATE = enum.Enum('STATE', 'SEARCH TO_NEXT APPROACH GRAB CHECK_GRASPING TO_DROP DROP RECOVER')
+        self.sim = sim
 
         self.goal = [None]
         self.goal_array = []
@@ -51,11 +56,10 @@ class SawyerPlanner:
         self.manipulator_joints = []
         self.num_goals_history = 0  # length of sequenced goals
         self.ee_position = None
-        self.starting_position_offset = 0.4
+        self.starting_position_offset = 0.5
         self.apple_offset = [0.0, 0.0, 0.0]
         # self.go_to_goal_offset = [0.05, 0.0, 0.0]
         self.go_to_goal_offset = 0.12  # offset from apple centre to sawyer end effector frame (not gripper)
-        self.sim = sim
         self.limits_epsilon = 0.01
         self.K_V = 0.3
         self.K_VQ = 2.1
@@ -73,8 +77,11 @@ class SawyerPlanner:
         self.joint_limits_upper = numpy.array([3.0503, 2.2736, 3.0426, 3.0439, 2.9761, 2.9761, 4.7124]) - self.limits_epsilon
         self.joint_limits_lower_recover = numpy.array([-3.0503, -3.8095, -3.0426, -3.0439, -2.9761, -2.9761, -4.7124])
         self.joint_limits_upper_recover = numpy.array([3.0503, 2.2736, 3.0426, 3.0439, 2.9761, 2.9761, 4.7124])
+        self.environment_setup()
+        self.robot_arm_indices = self.robot.GetActiveManipulator().GetArmIndices()
+        self.num_joints = len(self.robot_arm_indices)
 
-        self.joint_names = ['right_j0', 'right_j1', 'right_j2', 'right_j3', 'right_j4', 'right_j5', 'right_j6']
+        # self.joint_names = ['right_j0', 'right_j1', 'right_j2', 'right_j3', 'right_j4', 'right_j5', 'right_j6']
 
         # trasform from the real sawyer EE to openrave camera frame 
         self.T_EE2C = numpy.array([
@@ -91,12 +98,20 @@ class SawyerPlanner:
         #             [0.0, 0.0, 1.0, 0.12],
         #             [0.0, 0.0, 0.0, 1.0]
         #             ])
-        self.T_G2EE = numpy.array([
-                    [0.9961947, 0.0871557, 0.0, 0.0],
-                    [-0.0871557, 0.9961947, 0.0, 0.075],
-                    [0.0, 0.0, 1.0, -0.12],
-                    [0.0, 0.0, 0.0, 1.0]
-                    ])
+        if self.robot_name == "sawyer":
+            self.T_G2EE = numpy.array([
+                        [0.9961947, 0.0871557, 0.0, 0.0],
+                        [-0.0871557, 0.9961947, 0.0, 0.075],
+                        [0.0, 0.0, 1.0, -0.12],
+                        [0.0, 0.0, 0.0, 1.0]
+                        ])
+        else:
+            self.T_G2EE = numpy.array([
+                        [1.0, 0.0, 0.0, 0.0],
+                        [0.0, 1.0, 0.0, 0.0],
+                        [0.0, 0.0, 1.0, -0.12],
+                        [0.0, 0.0, 0.0, 1.0]
+                        ])
 
         #self.T_G2EE = numpy.array([
         #            [0.0, -1.0, 0.0, 0.075],
@@ -120,6 +135,8 @@ class SawyerPlanner:
         self.sequencer_client = rospy.ServiceProxy("/sequence_tasks_srv", SequenceTasks)
         self.set_robot_joints = rospy.ServiceProxy('set_robot_joints', SetRobotJoints)
         self.find_ik_solutions_srv = rospy.ServiceProxy('find_ik_solutions', FindIKSolutions)
+        self.draw_point_srv = rospy.ServiceProxy('draw_point', DrawPoint)
+        self.clear_point_srv = rospy.ServiceProxy('clear_point', Empty)
 
         time.sleep(0.5)
         
@@ -131,7 +148,8 @@ class SawyerPlanner:
         or_joints_pos = numpy.array(or_joint_states.position)
 
         if self.sim:
-            if 1:
+            self.stop_arm()
+            if RANDOM_START:
             # if len(last_joints):
                 joint_msg = JointState()
                 joint_msg.position = last_joints
@@ -246,9 +264,21 @@ class SawyerPlanner:
         rospack = rospkg.RosPack()
         with self.env:
             # name = module.SendCommand('load /home/peppe/python_test/sawyer.urdf /home/peppe/python_test/sawyer_base.srdf')
-            name = module.SendCommand(
-                'loadURI ' + rospack.get_path('fredsmp_utils') + '/robots/sawyer/sawyer.urdf'
-                + ' ' + rospack.get_path('fredsmp_utils') + '/robots/sawyer/sawyer.srdf')
+            if self.robot_name == "sawyer":
+                name = module.SendCommand(
+                    'loadURI ' + rospack.get_path('fredsmp_utils') + '/robots/sawyer/sawyer.urdf'
+                    + ' ' + rospack.get_path('fredsmp_utils') + '/robots/sawyer/sawyer.srdf')
+            elif self.robot_name == "ur10":
+                name = module.SendCommand(
+                    'loadURI ' + rospack.get_path('fredsmp_utils') + '/robots/ur10/ur10.urdf'
+                    + ' ' + rospack.get_path('fredsmp_utils') + '/robots/ur10/ur10.srdf')               
+            elif self.robot_name == "ur5":
+                name = module.SendCommand(
+                    'loadURI ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/ur5.urdf'
+                    + ' ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/ur5.srdf') 
+            else:
+                rospy.logerr("invalid robot name, exiting...")
+                sys.exit()              
             self.robot = self.env.GetRobot(name)
 
         time.sleep(0.5)
@@ -260,6 +290,13 @@ class SawyerPlanner:
 
         manip = self.robot.GetActiveManipulator()
         self.robot.SetActiveDOFs(manip.GetArmIndices())
+        if self.robot_name == "ur10" or self.robot_name == "ur5":
+            self.joint_limits_lower = self.robot.GetActiveDOFLimits()[0] + self.limits_epsilon
+            self.joint_limits_upper = self.robot.GetActiveDOFLimits()[1] - self.limits_epsilon
+            print "limits_lower:"
+            print self.joint_limits_lower
+            print "limits_upper:"
+            print self.joint_limits_upper
 
     # def socket_handshake(self, *args):
     #     self.socket_handler.send("\n")
@@ -376,6 +413,9 @@ class SawyerPlanner:
             print("starting position and direction: ")
             print(self.starting_position, self.starting_direction)
             # time_start = rospy.get_time()
+
+            draw_point_msg = Point(self.goal[0], self.goal[1], self.goal[2])
+            self.draw_point_srv(draw_point_msg)
             plan_success, plan_duration, traj_duration = self.plan_to_goal(self.starting_position, self.starting_direction, 0.0)
             # elapsed_time = rospy.get_time() - time_start
             # print("self.goal: " + str(self.goal))
@@ -429,7 +469,8 @@ class SawyerPlanner:
             self.recovery_trajectory = []
 
             time_start = rospy.get_time()
-            status = self.go_to_goal([None], numpy.array([1.0, 0.0, 0.0]), self.go_to_goal_offset)
+            # status = self.go_to_goal([None], numpy.array([1.0, 0.0, 0.0]), self.go_to_goal_offset)
+            status = self.go_to_goal([None], numpy.array([None]), self.go_to_goal_offset)
             elapsed_time = rospy.get_time() - time_start
             if status == 0:
                 self.state = self.STATE.GRAB
@@ -749,7 +790,8 @@ class SawyerPlanner:
     #         self.arm.move_to_joint_positions(cmd)
                            
     def stop_arm(self):
-        joint_vel = numpy.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        # joint_vel = numpy.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        joint_vel = numpy.zeros(self.num_joints)
         if self.sim:
             msg = JointTrajectoryPoint()
             msg.velocities = joint_vel
@@ -810,13 +852,19 @@ class SawyerPlanner:
             else:
                 return True
 
+    def lin_point(self, from_point, look_at, step=0.1):
+        uvec = [x1 - x2 for x1, x2 in zip(look_at, from_point)]
+        umag = math.sqrt((uvec[0])**2 + (uvec[1])**2 + (uvec[2])**2)
+        norm = [x / umag for x in uvec]
+        lin_point_ = [x + step * y for x, y in zip(from_point, norm)]
+        return lin_point_
+
         
     def go_to_goal(self, goal = [None], to_goal = [None], offset = 0.05):
 
+        lin_step = 0.0
+        # ee_start_position = self.ee_position
         if goal[0] == None:
-            # x_noise = numpy.random.normal(0.0, 0.03)
-            # y_noise = numpy.random.normal(0.0, 0.05)
-            # z_noise = numpy.random.normal(0.0, 0.05)
             goal = deepcopy(self.goal)
             self_goal = True
             rospy.loginfo("goal: " + str(goal))
@@ -832,16 +880,37 @@ class SawyerPlanner:
             else:
                 goal_off = goal - offset * self.normalize(to_goal)
 
-        while numpy.linalg.norm(goal_off - self.ee_position) > 0.01 and not rospy.is_shutdown():
+        start_distance = numpy.linalg.norm(goal_off - self.ee_position)
+        while numpy.linalg.norm(goal_off - self.ee_position) > 0.003 and not rospy.is_shutdown():
             # rospy.loginfo_throttle(0.5, "goal_off: " + str(goal_off))
             # print("ee_position: " + str(self.ee_position))
             #print("ee_orientation: " + str(self.ee_orientation))
             if (self_goal):  # means servo'ing to a dynamic target
                 goal = deepcopy(self.goal)
+                if CONTINUOUS_NOISE:
+                    # x_noise = numpy.random.normal(0.0, 0.01)
+                    # y_noise = numpy.random.normal(0.0, 0.02)
+                    # z_noise = numpy.random.normal(0.0, 0.02)
+                    # lin_step = min(1 - numpy.linalg.norm(self.ee_position - goal) / start_distance, 1.0) 
+                    # noise_vec = self.lin_point(goal, goal + self.noise, lin_step)
+                    noise_vec = min(lin_step, 1.0) * ((goal + self.noise) - goal) + goal
+                    lin_step += 0.0015
+                    # noise_vec = self.lin_point(goal, self.noise, )
+                    # goal += numpy.asarray(noise_vec)
+                    print("noise_vec: " + str(noise_vec))
+                    print("self.noise " + str(self.noise))
+                    print("lin_step: " + str(lin_step))
+                    print("goal: " + str(goal))
+                    print("goal+self.goal: " + str(goal + self.noise))
+                    goal = copy(noise_vec)
+                    draw_point_msg = Point(goal[0], goal[1], goal[2])
+                    self.draw_point_srv(draw_point_msg)
+                    # rospy.sleep(0.1)
                 goal_off = deepcopy(self.goal_off)
                 if self.sim:
                     # update goal_off because ee_position changes
-                    goal += self.noise
+                    if not CONTINUOUS_NOISE:
+                        goal += self.noise
                     goal_off = goal - offset * self.normalize(goal - self.ee_position)
                     # rospy.loginfo_throttle(0.5, "adding noise" + str(self.noise))
                     # rospy.loginfo_throttle(0.5, "self.noise_array" + str(self.noise_array))
@@ -868,7 +937,7 @@ class SawyerPlanner:
                 # sys.exit()
 
 
-            des_vel_t = self.K_V * (goal_off - self.ee_position)
+            des_vel_t = self.K_V * (goal - self.ee_position)
 
             if to_goal[0] != None:
                 des_omega = - self.K_VQ * self.get_angular_velocity([None], to_goal)
@@ -902,6 +971,7 @@ class SawyerPlanner:
             # rospy.sleep(0.1)
 
         self.stop_arm()
+        self.clear_point_srv()
         return 0
 
 
@@ -1032,12 +1102,12 @@ class SawyerPlanner:
         mid_joint_limit = (self.joint_limits_lower + self.joint_limits_upper) / 2.0
         Q_star = (self.joint_limits_upper - self.joint_limits_lower) / 20.0
 
-        q_dot = numpy.zeros((7, 1))
+        q_dot = numpy.zeros((self.num_joints, 1))
 
-        max_joint_speed = 1.0
+        max_joint_speed = 5.0
         K = 1.0
         weight_vector = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-        for i in range(7):
+        for i in range(self.num_joints):
             #q_dot[i] = - (K * weight_vector[i]) * (joints[i] - mid_joint_limit[i]) / ( (self.joint_limits_upper[i] - self.joint_limits_lower[i])**2)
             if (abs(joints[i] - self.joint_limits_upper[i]) <= Q_star[i]):
                q_dot[i] = - (K * weight_vector[i] / (self.joint_limits_upper[i] - self.joint_limits_lower[i])) * ( 1.0/Q_star[i] - 1.0/abs(joints[i] - self.joint_limits_upper[i]) ) * (1.0/(joints[i] - self.joint_limits_upper[i])**2) * abs(joints[i] - self.joint_limits_upper[i]) / (joints[i] - self.joint_limits_upper[i])
@@ -1057,9 +1127,9 @@ class SawyerPlanner:
         # print("joints: " + str(self.manipulator_joints))
         # print ("q: " + str(numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1))))
         # print ("q_dot: " + str(q_dot))
-        # print ("qdot_proj: " + str(numpy.dot( (numpy.eye(7) - numpy.dot( numpy.linalg.pinv(J) , J )), q_dot)))
-        return numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1)) + numpy.dot( (numpy.eye(7) - numpy.dot( numpy.linalg.pinv(J) , J )), q_dot)
-        #return numpy.dot( (numpy.eye(7) - numpy.dot( numpy.linalg.pinv(J) , J )), q_dot)
+        # print ("qdot_proj: " + str(numpy.dot( (numpy.eye(self.num_joints) - numpy.dot( numpy.linalg.pinv(J) , J )), q_dot)))
+        return numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1)) + numpy.dot( (numpy.eye(self.num_joints) - numpy.dot( numpy.linalg.pinv(J) , J )), q_dot)
+        #return numpy.dot( (numpy.eye(self.num_joints) - numpy.dot( numpy.linalg.pinv(J) , J )), q_dot)
 
         # return numpy.dot( numpy.linalg.pinv(J), des_vel.reshape(6,1))
 

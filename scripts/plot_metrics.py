@@ -30,8 +30,8 @@ fred_dir = '/home/fred/hydra_ws/src/sawyer_planner/results/penalty_tanh/15/freds
 # eucl_dir = '/home/fred/hydra_ws/src/sawyer_planner/results/penalty_tanh/5/euclidean'
 # fred_dir = '/home/fred/hydra_ws/src/sawyer_planner/results/penalty_tanh/5/fredsmp'
 
-# eucl_dir = '/home/fred/hydra_ws/src/sawyer_planner/results/euclidean'
-# fred_dir = '/home/fred/hydra_ws/src/sawyer_planner/results/fredsmp'
+eucl_dir = '/home/fred/hydra_ws/src/sawyer_planner/results/tanh_pure_cost_joint_diff_tsp/5/euclidean'
+fred_dir = '/home/fred/hydra_ws/src/sawyer_planner/results/tanh_pure_cost_joint_diff_tsp/5/fredsmp'
 # hybrid_dir = '/home/fred/hydra_ws/src/sawyer_planner/results/hybrid'
 # objects = ('naive', 'fredsmp', 'hybrid')
 objects = ('naive', 'fredsmp')

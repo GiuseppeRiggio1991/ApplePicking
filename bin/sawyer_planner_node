@@ -11,8 +11,10 @@ import pyquaternion
 
 LOGGING = True
 # sequencing_metrics = ['hybrid', 'euclidean', 'fredsmp']
-sequencing_metrics = ['fredsmp', 'euclidean']
-num_targets = 5
+# sequencing_metrics = ['fredsmp', 'euclidean']
+# sequencing_metrics = ['euclidean']
+sequencing_metrics = ['fredsmp']
+num_targets = 10
 num_experiments = 20
 
 def transform_target_start(target, planner):
@@ -63,9 +65,12 @@ def gen_goal_and_noise_arrays(planner, num_targets=8):
         goal_array.append(target)
 
         while len(solutions_offset) == 0:  # ensure noisy target is reachable
-            x_noise = numpy.random.normal(0.1, 0.05)
-            y_noise = numpy.random.normal(0.0, 0.05)
-            z_noise = numpy.random.normal(0.0, 0.05)
+            # x_noise = numpy.random.normal(0.1, 0.05)
+            # y_noise = numpy.random.normal(0.0, 0.05)
+            # z_noise = numpy.random.normal(0.0, 0.05)
+            x_noise = numpy.random.normal(0.01, 0.01)
+            y_noise = numpy.random.normal(0.0, 0.1)
+            z_noise = numpy.random.normal(0.0, 0.1)
             noisy_target = numpy.asarray(goal_array[-1] + numpy.asarray([x_noise, y_noise, z_noise]))
             # print noisy_target
             T_robot_offset = transform_target_offset(noisy_target, planner)
@@ -93,16 +98,28 @@ if __name__ == "__main__":
 
     rospy.init_node('sawyer_planner')
     rate = rospy.Rate(1000)
-    sim = False
-    if len(sys.argv) > 1:
-        if sys.argv[1] == 'sim':
-            sim = True
+    # sim = False
+    # if len(sys.argv) > 1:
+    #     if sys.argv[1] == 'sim':
+    #         sim = True
+    if rospy.has_param("sim"):
+        sim = rospy.get_param("sim")
+    else:
+        sim = False
+
+    if rospy.has_param('/robot_name'):
+        print "rospy.get_param: "
+        print rospy.get_param("/robot_name")
+        robot_name = rospy.get_param("/robot_name")
+    else:
+        print "no robot_name param, using sawyer "
+        robot_name = "sawyer"
 
     last_joints = []
 
     still_running = True
     if LOGGING and sim:
-        planner = sawyer_planner_node.SawyerPlanner('euclidean', sim)            
+        planner = sawyer_planner_node.SawyerPlanner('euclidean', sim, robot_name=robot_name)            
         home_pose = [
             [-0.99, 0.04, 0.13, 0.0],
             [-0.13, -0.30, -0.94, -0.4],
@@ -125,7 +142,7 @@ if __name__ == "__main__":
             for metric in sequencing_metrics:
                 rospy.loginfo("METRIC: " + metric)
                 still_running = True
-                planner = sawyer_planner_node.SawyerPlanner(metric, sim, goal_array, noise_array, last_joints)
+                planner = sawyer_planner_node.SawyerPlanner(metric, sim, goal_array, noise_array, last_joints, robot_name=robot_name)
                 while still_running and not rospy.is_shutdown():
                     # print(planner.goal_array)
                     # planner.sequence_goals()
@@ -135,7 +152,7 @@ if __name__ == "__main__":
             # last_joints = planner.manipulator_joints
     else:
         metric = 'euclidean'
-        planner = sawyer_planner_node.SawyerPlanner(metric, sim)
+        planner = sawyer_planner_node.SawyerPlanner(metric, sim, robot_name=robot_name)
         while still_running and not rospy.is_shutdown():
             # print(planner.goal_array)
             # planner.sequence_goals()
