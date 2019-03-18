@@ -177,7 +177,9 @@ target_link_libraries(KF_test_node ${catkin_LIBRARIES} ${PCL_LIBRARIES})
 add_executable(fake_apples_node src/sawyer_planner/fake_apples.cpp)
 target_link_libraries(fake_apples_node ${catkin_LIBRARIES} ${PCL_LIBRARIES})
 
-
+#foreach(p ${ALL_EXECS})
+	add_dependencies(goal_manager_node hydra_utils_generate_messages_cpp ${${PROJECT_NAME}_EXPORTED_TARGETS})
+#endforeach(p)
 #############
 ## Install ##
 #############
