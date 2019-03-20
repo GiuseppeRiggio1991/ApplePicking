@@ -63,7 +63,7 @@ class SawyerPlanner:
         self.go_to_goal_offset = 0.12  # offset from apple centre to sawyer end effector frame (not gripper)
         self.limits_epsilon = 0.01
         self.K_V = 0.3
-        self.K_VQ = 3.1
+        self.K_VQ = 2.5
         self.CONFIG_UP = numpy.array([0.0, 0.0, 0.0, 0.0, 0.0, -numpy.pi/2, 0.0])
         self.MIN_MANIPULABILITY = 0.025
         self.MIN_MANIPULABILITY_RECOVER = 0.02
@@ -219,7 +219,7 @@ class SawyerPlanner:
         else:
 
             self.goal_array = [[0.45, 0.3, 0.62]]
-            self.noise_array = [[0.0, 0.0, 0.0]]
+            self.noise_array = [[0.0, 0.0, 0.02]]
             if rospy.get_param('/robot_name') == "sawyer":
                 # from intera_core_msgs.msg import EndpointState, JointLimits
                 import intera_interface
@@ -433,9 +433,9 @@ class SawyerPlanner:
             print(self.starting_position, self.starting_direction)
             # time_start = rospy.get_time()
 
-            if self.sim:
-                draw_point_msg = Point(self.goal[0], self.goal[1], self.goal[2])
-                self.draw_point_srv(draw_point_msg)
+            # if self.sim:
+            draw_point_msg = Point(self.goal[0], self.goal[1], self.goal[2])
+            self.draw_point_srv(draw_point_msg)
 
             plan_success, plan_duration, traj_duration = self.plan_to_goal(self.starting_position, self.starting_direction, 0.0)
             # elapsed_time = rospy.get_time() - time_start
@@ -474,7 +474,7 @@ class SawyerPlanner:
                 self.enable_bridge_pub.publish(Bool(True)) 
             rospy.sleep(1.0)
 
-            self.K_VQ = 2.5
+            # self.K_VQ = 2.5 # 66666
 
             # apple_check_srv = AppleCheckRequest()
             # apple_check_srv.apple_pose.x = self.goal[0];
@@ -741,8 +741,9 @@ class SawyerPlanner:
                 msg.pose.position.y,
                 msg.pose.position.z]
         pose = openravepy.matrixFromPose(pose)
-        ee_pose = numpy.dot(pose, self.T_G2EE)
-        ee_pose = openravepy.poseFromMatrix(ee_pose)
+        # ee_pose = numpy.dot(pose, self.T_G2EE)
+        # ee_pose = openravepy.poseFromMatrix(ee_pose)
+        ee_pose = openravepy.poseFromMatrix(pose)
         self.ee_orientation = pyquaternion.Quaternion(ee_pose[:4])
         self.ee_position = numpy.array(ee_pose[4:])
 
@@ -913,13 +914,14 @@ class SawyerPlanner:
 
         start_distance = numpy.linalg.norm(goal_off - self.ee_position)
         # while numpy.linalg.norm(goal_off - self.ee_position) > 0.01 and not rospy.is_shutdown():
-        while numpy.linalg.norm(goal - self.ee_position) > 0.015 and not rospy.is_shutdown():
+        while numpy.linalg.norm(goal - self.ee_position) > 0.005 and not rospy.is_shutdown():
             # rospy.loginfo_throttle(0.5, "goal_off: " + str(goal_off))
             # print("ee_position: " + str(self.ee_position))
             #print("ee_orientation: " + str(self.ee_orientation))
             if (self_goal):  # means servo'ing to a dynamic target
                 goal = deepcopy(self.goal)
-                if self.sim:
+                if 1:
+                # if self.sim:
                     if CONTINUOUS_NOISE:
                         # x_noise = numpy.random.normal(0.0, 0.01)
                         # y_noise = numpy.random.normal(0.0, 0.02)
@@ -934,10 +936,10 @@ class SawyerPlanner:
                         print("self.noise " + str(self.noise))
                         print("lin_step: " + str(lin_step))
                         print("goal: " + str(goal))
-                        print("goal+self.goal: " + str(goal + self.noise))
+                        print("goal + self.noise: " + str(goal + self.noise))
                         goal = copy(noise_vec)
-                        draw_point_msg = Point(goal[0], goal[1], goal[2])
-                        self.draw_point_srv(draw_point_msg)
+                        # draw_point_msg = Point(goal[0], goal[1], goal[2])
+                        # self.draw_point_srv(draw_point_msg)
                     # rospy.sleep(0.1)
                 goal_off = deepcopy(self.goal_off)
                 if self.sim:
@@ -949,6 +951,8 @@ class SawyerPlanner:
                     # rospy.loginfo_throttle(0.5, "self.noise_array" + str(self.noise_array))
                 self.recovery_trajectory.append(copy(self.manipulator_joints))
 
+            draw_point_msg = Point(goal[0], goal[1], goal[2])
+            self.draw_point_srv(draw_point_msg)
             # rospy.loginfo_throttle(0.5, "ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
             rospy.loginfo("ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
             # rospy.loginfo_throttle(0.5, "[distance calc] ee_position: " + str(self.ee_position))
