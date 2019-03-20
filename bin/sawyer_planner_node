@@ -14,8 +14,8 @@ LOGGING = True
 # sequencing_metrics = ['fredsmp', 'euclidean']
 sequencing_metrics = ['euclidean']
 # sequencing_metrics = ['fredsmp']
-num_targets = 10
-num_experiments = 20
+num_targets = 1
+num_experiments = 1
 
 def transform_target_start(target, planner):
     q = pyquaternion.Quaternion(0.5, -0.5, 0.5, -0.5)
