@@ -50,7 +50,7 @@ def gen_goal_and_noise_arrays(planner, num_targets=8):
     solutions_offset = []
     for i in range(num_targets):  # ensure target is reachable
         while len(solutions) == 0:
-            rand_x = random.uniform(0.85, 0.95)
+            rand_x = random.uniform(0.085, 0.095)
             rand_y = random.uniform(-0.35, 0.35)
             rand_z = random.uniform(0.2, 0.7)
             target = [rand_x, rand_y, rand_z]
@@ -119,9 +119,9 @@ if __name__ == "__main__":
 
     still_running = True
     if LOGGING and sim:
-        planner = sawyer_planner_node.SawyerPlanner('euclidean', sim, robot_name=robot_name)            
+        planner = sawyer_planner_node.SawyerPlanner('euclidean', sim, robot_name=robot_name)
         home_pose = [
-            [-0.99, 0.04, 0.13, 0.0],
+            [-0.99, 0.04, 0.13, 0.2],
             [-0.13, -0.30, -0.94, -0.4],
             [0.00, -0.95, 0.30, 0.85],
             [0.00, 0.00, 0.00, 1.00]

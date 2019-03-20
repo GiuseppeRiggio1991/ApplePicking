@@ -195,7 +195,7 @@ class SawyerPlanner:
             self.goal_array = copy(goal_array)
             self.noise_array = copy(noise_array)
 
-            self.goal_array = [[0.35, -0.3, 0.62]]
+            self.goal_array = [[0.75, -0.3, 0.62]]
             self.noise_array = [[0.0, 0.0, 0.0]]
             # self.noise_array = [[ 0.0, 0.0, 0.0]]  # joint limits
             # self.goal_array = [[ 0.91032737, -0.07162992 , 0.18117678]]  # joint limits
@@ -218,7 +218,7 @@ class SawyerPlanner:
         # if not self.sim:
         else:
 
-            self.goal_array = [[0.45, 0.3, 0.62]]
+            self.goal_array = [[0.45, -0.3, 0.62]]
             self.noise_array = [[0.0, 0.0, 0.02]]
             if rospy.get_param('/robot_name') == "sawyer":
                 # from intera_core_msgs.msg import EndpointState, JointLimits
