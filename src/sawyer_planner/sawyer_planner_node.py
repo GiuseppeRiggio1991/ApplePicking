@@ -63,7 +63,7 @@ class SawyerPlanner:
         self.go_to_goal_offset = 0.12  # offset from apple centre to sawyer end effector frame (not gripper)
         self.limits_epsilon = 0.01
         self.K_V = 0.3
-        self.K_VQ = 2.1
+        self.K_VQ = 3.1
         self.CONFIG_UP = numpy.array([0.0, 0.0, 0.0, 0.0, 0.0, -numpy.pi/2, 0.0])
         self.MIN_MANIPULABILITY = 0.025
         self.MIN_MANIPULABILITY_RECOVER = 0.02
@@ -218,7 +218,7 @@ class SawyerPlanner:
         # if not self.sim:
         else:
 
-            self.goal_array = [[0.35, -0.3, 0.62]]
+            self.goal_array = [[0.45, 0.3, 0.62]]
             self.noise_array = [[0.0, 0.0, 0.0]]
             if rospy.get_param('/robot_name') == "sawyer":
                 # from intera_core_msgs.msg import EndpointState, JointLimits
@@ -912,7 +912,8 @@ class SawyerPlanner:
                 goal_off = goal - offset * self.normalize(to_goal)
 
         start_distance = numpy.linalg.norm(goal_off - self.ee_position)
-        while numpy.linalg.norm(goal_off - self.ee_position) > 0.01 and not rospy.is_shutdown():
+        # while numpy.linalg.norm(goal_off - self.ee_position) > 0.01 and not rospy.is_shutdown():
+        while numpy.linalg.norm(goal - self.ee_position) > 0.015 and not rospy.is_shutdown():
             # rospy.loginfo_throttle(0.5, "goal_off: " + str(goal_off))
             # print("ee_position: " + str(self.ee_position))
             #print("ee_orientation: " + str(self.ee_orientation))
@@ -948,7 +949,8 @@ class SawyerPlanner:
                     # rospy.loginfo_throttle(0.5, "self.noise_array" + str(self.noise_array))
                 self.recovery_trajectory.append(copy(self.manipulator_joints))
 
-            rospy.loginfo_throttle(0.5, "ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
+            # rospy.loginfo_throttle(0.5, "ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
+            rospy.loginfo("ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
             # rospy.loginfo_throttle(0.5, "[distance calc] ee_position: " + str(self.ee_position))
             # rospy.loginfo_throttle(0.5, "[distance calc] goal: " + str(goal))
 
@@ -1001,11 +1003,11 @@ class SawyerPlanner:
                         cmd = dict(zip(cmd.keys(), joint_vel[::-1]))
                         self.arm.set_joint_velocities(cmd)
                     elif rospy.get_param('/robot_name') == "ur5" or rospy.get_param('/robot_name') == "ur10":
-                        cmd = str("speedj([%.3f,%.3f,%.3f,%.3f,%.3f,%.3f],3.0,0.02)" % tuple(joint_vel)) + "\n"
+                        cmd = str("speedj([%.5f,%.5f,%.5f,%.5f,%.5f,%.5f],5.0,0.05)" % tuple(joint_vel)) + "\n"
                         # print ("CMD: " + cmd)
                         self.s.send(cmd)
 
-            rospy.sleep(0.004)
+            # rospy.sleep(0.01)
 
         self.stop_arm()
         if self.sim:
@@ -1018,7 +1020,8 @@ class SawyerPlanner:
         iters = 10
         rad_step = 2 * numpy.pi / float(iters)
         for it in range(iters):
-            rad = rad_step * it + (numpy.pi / 2)
+            # rad = rad_step * it + (numpy.pi / 2)
+            rad = rad_step * it + numpy.pi
             print rad
             x = 0.15 * math.cos(rad)
             y = 0.15 * math.sin(rad)
