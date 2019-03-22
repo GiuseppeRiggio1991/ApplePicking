@@ -31,6 +31,7 @@ from sawyer_planner.srv import AppleCheck, AppleCheckRequest, AppleCheckResponse
 from online_planner.srv import *
 from task_planner.srv import *
 from localisation.srv import *
+from rgb_segmentation.srv import *
 # from task_planner.msgs import *
 
 import pyquaternion
@@ -57,6 +58,7 @@ class SawyerPlanner:
         self.manipulator_joints = []
         self.num_goals_history = 0  # length of sequenced goals
         self.ee_position = None
+        self.ee_pose = []
         self.starting_position_offset = 0.5
         self.apple_offset = [0.0, 0.0, 0.0]
         # self.go_to_goal_offset = [0.05, 0.0, 0.0]
@@ -139,6 +141,7 @@ class SawyerPlanner:
         self.draw_point_srv = rospy.ServiceProxy('draw_point', DrawPoint)
         self.clear_point_srv = rospy.ServiceProxy('clear_point', Empty)
         self.check_ray_srv = rospy.ServiceProxy('test_check_ray', CheckRay)
+        self.cut_point_srv = rospy.ServiceProxy('cut_point_srv', GetCutPoint)
 
         time.sleep(0.5)
         
@@ -197,6 +200,12 @@ class SawyerPlanner:
 
             self.goal_array = [[0.75, -0.3, 0.62]]
             self.noise_array = [[0.0, 0.0, 0.0]]
+            cut_point_msg = self.cut_point_srv.call()
+            print('cut_point_msg.cut_point: ' + str(cut_point_msg.cut_point))
+            cut_point_pose = numpy.identity(4)
+            cut_point_pose[:3,3] = numpy.transpose([cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
+            cut_point_pose = numpy.dot(self.ee_pose, cut_point_pose)
+            self.goal_array = [cut_point_pose[:3,3]]
             # self.noise_array = [[ 0.0, 0.0, 0.0]]  # joint limits
             # self.goal_array = [[ 0.91032737, -0.07162992 , 0.18117678]]  # joint limits
 
@@ -217,7 +226,6 @@ class SawyerPlanner:
 
         # if not self.sim:
         else:
-
             self.goal_array = [[0.45, -0.3, 0.62]]
             self.noise_array = [[0.0, 0.0, 0.02]]
             if rospy.get_param('/robot_name') == "sawyer":
@@ -741,6 +749,7 @@ class SawyerPlanner:
                 msg.pose.position.y,
                 msg.pose.position.z]
         pose = openravepy.matrixFromPose(pose)
+        self.ee_pose = copy(pose)
         # ee_pose = numpy.dot(pose, self.T_G2EE)
         # ee_pose = openravepy.poseFromMatrix(ee_pose)
         ee_pose = openravepy.poseFromMatrix(pose)
