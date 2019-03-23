@@ -198,14 +198,16 @@ class SawyerPlanner:
             self.goal_array = copy(goal_array)
             self.noise_array = copy(noise_array)
 
-            self.goal_array = [[0.75, -0.3, 0.62]]
+            # self.goal_array = [[0.75, -0.3, 0.62]]
+            self.goal_array = [[0.45, 0.0, 0.62]]
             self.noise_array = [[0.0, 0.0, 0.0]]
-            cut_point_msg = self.cut_point_srv.call()
-            print('cut_point_msg.cut_point: ' + str(cut_point_msg.cut_point))
-            cut_point_pose = numpy.identity(4)
-            cut_point_pose[:3,3] = numpy.transpose([cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
-            cut_point_pose = numpy.dot(self.ee_pose, cut_point_pose)
-            self.goal_array = [cut_point_pose[:3,3]]
+            if 0:
+                cut_point_msg = self.cut_point_srv.call()
+                print('cut_point_msg.cut_point: ' + str(cut_point_msg.cut_point))
+                cut_point_pose = numpy.identity(4)
+                cut_point_pose[:3,3] = numpy.transpose([cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
+                cut_point_pose = numpy.dot(self.ee_pose, cut_point_pose)
+                self.goal_array = [cut_point_pose[:3,3]]
             # self.noise_array = [[ 0.0, 0.0, 0.0]]  # joint limits
             # self.goal_array = [[ 0.91032737, -0.07162992 , 0.18117678]]  # joint limits
 
@@ -227,7 +229,32 @@ class SawyerPlanner:
         # if not self.sim:
         else:
             self.goal_array = [[0.45, -0.3, 0.62]]
-            self.noise_array = [[0.0, 0.0, 0.02]]
+            self.noise_array = [[0.0, 0.0, 0.0]]
+            if 1:
+                T_off = numpy.array([
+                            [1.0, 0.0, 0.0, -0.025],
+                            [0.0, 1.0, 0.0, 0.0],
+                            [0.0, 0.0, 1.0, 0.0],
+                            [0.0, 0.0, 0.0, 1.0]
+                            ])
+                rospy.set_param('segment_color', 'red')
+                cut_point_msg = self.cut_point_srv.call()
+                print('cut_point_msg.cut_point: ' + str(cut_point_msg.cut_point))
+                cut_point_pose = numpy.identity(4)
+                cut_point_pose[:3,3] = numpy.transpose([cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
+                cut_point_pose = numpy.dot(self.ee_pose, cut_point_pose)
+                # cut_point_pose = numpy.dot(cut_point_pose, T_off)
+                self.goal_array = [cut_point_pose[:3,3]]
+
+                rospy.set_param('segment_color', 'blue')
+                cut_point_msg = self.cut_point_srv.call()
+                print('noise_cut_point_msg.cut_point: ' + str(cut_point_msg.cut_point))
+                noise_cut_point_pose = numpy.identity(4)
+                noise_cut_point_pose[:3,3] = numpy.transpose([cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
+                noise_cut_point_pose = numpy.dot(self.ee_pose, noise_cut_point_pose)
+                # noise_cut_point_pose = numpy.dot(noise_cut_point_pose, T_off)
+                self.noise_array = numpy.asarray(noise_cut_point_pose[:3,3]).reshape(1,3) - numpy.asarray(cut_point_pose[:3,3]).reshape(1,3)
+                print('noise_array: ' + str(self.noise_array))
             if rospy.get_param('/robot_name') == "sawyer":
                 # from intera_core_msgs.msg import EndpointState, JointLimits
                 import intera_interface
@@ -1034,7 +1061,8 @@ class SawyerPlanner:
         rad_step = 2 * numpy.pi / float(iters)
         for it in range(iters):
             # rad = rad_step * it + (numpy.pi / 2)
-            rad = rad_step * it + numpy.pi
+            # rad = rad_step * it + numpy.pi
+            rad = rad_step * it
             print rad
             x = 0.15 * math.cos(rad)
             y = 0.15 * math.sin(rad)
