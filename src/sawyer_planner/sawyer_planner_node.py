@@ -40,7 +40,7 @@ import socket
 LOGGING = True
 CONTINUOUS_NOISE = True
 RANDOM_START = False
-HOME_POSE = False
+HOME_POSE = True
 
 class SawyerPlanner:
 
@@ -52,6 +52,7 @@ class SawyerPlanner:
         self.sim = sim
 
         self.goal = [None]
+        self.goal_not_offset = None
         self.goal_array = []
         self.sequenced_goals = []
         self.sequenced_trajectories = []
@@ -196,18 +197,54 @@ class SawyerPlanner:
             # rospy.loginfo(str(self.noise_array))
 
             self.goal_array = copy(goal_array)
-            self.noise_array = copy(noise_array)
+            self.noise_array = copy(noise_array) + self.goal_array
 
             # self.goal_array = [[0.75, -0.3, 0.62]]
-            self.goal_array = [[0.45, 0.0, 0.62]]
-            self.noise_array = [[0.0, 0.0, 0.0]]
+            # self.goal_array = [[0.45, 0.0, 0.62]]
+            # self.noise_array = [[0.0, 0.0, 0.0]]
+            # if 0:
+            #     cut_point_msg = self.cut_point_srv.call()
+            #     print('cut_point_msg.cut_point: ' + str(cut_point_msg.cut_point))
+            #     cut_point_pose = numpy.identity(4)
+            #     cut_point_pose[:3,3] = numpy.transpose([cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
+            #     cut_point_pose = numpy.dot(self.ee_pose, cut_point_pose)
+            #     self.goal_array = [cut_point_pose[:3,3]]
             if 0:
-                cut_point_msg = self.cut_point_srv.call()
-                print('cut_point_msg.cut_point: ' + str(cut_point_msg.cut_point))
-                cut_point_pose = numpy.identity(4)
-                cut_point_pose[:3,3] = numpy.transpose([cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
+                T_off = numpy.array([
+                            [1.0, 0.0, 0.0, -0.025],
+                            [0.0, 1.0, 0.0, 0.0],
+                            [0.0, 0.0, 1.0, -0.01],
+                            [0.0, 0.0, 0.0, 1.0]
+                            ])
+                if 0:
+                    rospy.set_param('segment_color', 'red')
+                    cut_point_msg = self.cut_point_srv.call()
+                    print('cut_point_msg.cut_point: ' + str(cut_point_msg.cut_point))
+                    cut_point_pose = numpy.identity(4)
+                    cut_point_pose[:3,3] = numpy.transpose([cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
+                if 1:
+                    cut_point_pose = numpy.identity(4)
+                    cut_point_pose[:3,3] = numpy.transpose([0.026 + 0.015, 0.0, 0.171 + 0.2])
+                    # cut_point_pose[:3,3] = numpy.transpose([0.0426 - 0.02, 0.063, 0.167 + 0.2])
+                cut_point_pose = numpy.dot(T_off, cut_point_pose)
                 cut_point_pose = numpy.dot(self.ee_pose, cut_point_pose)
                 self.goal_array = [cut_point_pose[:3,3]]
+
+                if 0:
+                    rospy.set_param('segment_color', 'blue')
+                    cut_point_msg = self.cut_point_srv.call()
+                    print('noise_cut_point_msg.cut_point: ' + str(cut_point_msg.cut_point))
+                    noise_cut_point_pose = numpy.identity(4)
+                    noise_cut_point_pose[:3,3] = numpy.transpose([cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
+                if 1:
+                    noise_cut_point_pose = numpy.identity(4)
+                    noise_cut_point_pose[:3,3] = numpy.transpose([0.0426 + 0.015, 0.063, 0.167 + 0.2])
+                    # noise_cut_point_pose[:3,3] = numpy.transpose([0.026 - 0.02, 0.0, 0.171 + 0.2])
+                noise_cut_point_pose = numpy.dot(T_off, noise_cut_point_pose)
+                noise_cut_point_pose = numpy.dot(self.ee_pose, noise_cut_point_pose)
+                # self.noise_array = numpy.asarray(noise_cut_point_pose[:3,3]).reshape(1,3) - numpy.asarray(cut_point_pose[:3,3]).reshape(1,3)
+                self.noise_array = numpy.asarray(noise_cut_point_pose[:3,3]).reshape(1,3)
+                print('noise_array: ' + str(self.noise_array))
             # self.noise_array = [[ 0.0, 0.0, 0.0]]  # joint limits
             # self.goal_array = [[ 0.91032737, -0.07162992 , 0.18117678]]  # joint limits
 
@@ -228,32 +265,41 @@ class SawyerPlanner:
 
         # if not self.sim:
         else:
-            self.goal_array = [[0.45, -0.3, 0.62]]
-            self.noise_array = [[0.0, 0.0, 0.0]]
-            if 1:
+            # self.goal_array = [[0.45, -0.3, 0.62]]
+            # self.noise_array = [[0.0, 0.0, 0.0]]
+            if 0:
                 T_off = numpy.array([
                             [1.0, 0.0, 0.0, -0.025],
                             [0.0, 1.0, 0.0, 0.0],
-                            [0.0, 0.0, 1.0, 0.0],
+                            [0.0, 0.0, 1.0, -0.01],
                             [0.0, 0.0, 0.0, 1.0]
                             ])
-                rospy.set_param('segment_color', 'red')
-                cut_point_msg = self.cut_point_srv.call()
-                print('cut_point_msg.cut_point: ' + str(cut_point_msg.cut_point))
-                cut_point_pose = numpy.identity(4)
-                cut_point_pose[:3,3] = numpy.transpose([cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
+                if 0:
+                    rospy.set_param('segment_color', 'red')
+                    cut_point_msg = self.cut_point_srv.call()
+                    print('cut_point_msg.cut_point: ' + str(cut_point_msg.cut_point))
+                    cut_point_pose = numpy.identity(4)
+                    cut_point_pose[:3,3] = numpy.transpose([cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
+                if 1:
+                    cut_point_pose = numpy.identity(4)
+                    cut_point_pose[:3,3] = numpy.transpose([0.026, 0.0, 0.171])
+                cut_point_pose = numpy.dot(T_off, cut_point_pose)
                 cut_point_pose = numpy.dot(self.ee_pose, cut_point_pose)
-                # cut_point_pose = numpy.dot(cut_point_pose, T_off)
                 self.goal_array = [cut_point_pose[:3,3]]
 
-                rospy.set_param('segment_color', 'blue')
-                cut_point_msg = self.cut_point_srv.call()
-                print('noise_cut_point_msg.cut_point: ' + str(cut_point_msg.cut_point))
-                noise_cut_point_pose = numpy.identity(4)
-                noise_cut_point_pose[:3,3] = numpy.transpose([cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
+                if 0:
+                    rospy.set_param('segment_color', 'blue')
+                    cut_point_msg = self.cut_point_srv.call()
+                    print('noise_cut_point_msg.cut_point: ' + str(cut_point_msg.cut_point))
+                    noise_cut_point_pose = numpy.identity(4)
+                    noise_cut_point_pose[:3,3] = numpy.transpose([cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
+                if 1:
+                    noise_cut_point_pose = numpy.identity(4)
+                    noise_cut_point_pose[:3,3] = numpy.transpose([0.0426, 0.063, 0.167])
+                noise_cut_point_pose = numpy.dot(T_off, noise_cut_point_pose)
                 noise_cut_point_pose = numpy.dot(self.ee_pose, noise_cut_point_pose)
-                # noise_cut_point_pose = numpy.dot(noise_cut_point_pose, T_off)
-                self.noise_array = numpy.asarray(noise_cut_point_pose[:3,3]).reshape(1,3) - numpy.asarray(cut_point_pose[:3,3]).reshape(1,3)
+                # self.noise_array = numpy.asarray(noise_cut_point_pose[:3,3]).reshape(1,3) - numpy.asarray(cut_point_pose[:3,3]).reshape(1,3)
+                self.noise_array = numpy.asarray(noise_cut_point_pose[:3,3]).reshape(1,3)
                 print('noise_array: ' + str(self.noise_array))
             if rospy.get_param('/robot_name') == "sawyer":
                 # from intera_core_msgs.msg import EndpointState, JointLimits
@@ -327,7 +373,11 @@ class SawyerPlanner:
             elif self.robot_name == "ur5":
                 name = module.SendCommand(
                     'loadURI ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/ur5.urdf'
-                    + ' ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/ur5.srdf') 
+                    + ' ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/ur5.srdf')                
+            elif self.robot_name == "ur5_cutter":
+                name = module.SendCommand(
+                    'loadURI ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/ur5_cutter.urdf'
+                    + ' ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/ur5_cutter.srdf')
             else:
                 rospy.logerr("invalid robot name, exiting...")
                 sys.exit()              
@@ -342,7 +392,8 @@ class SawyerPlanner:
 
         manip = self.robot.GetActiveManipulator()
         self.robot.SetActiveDOFs(manip.GetArmIndices())
-        if self.robot_name == "ur10" or self.robot_name == "ur5":
+        if 1:
+        # if self.robot_name == "ur10" or self.robot_name == "ur5":
             self.joint_limits_lower = self.robot.GetActiveDOFLimits()[0] + self.limits_epsilon
             self.joint_limits_upper = self.robot.GetActiveDOFLimits()[1] - self.limits_epsilon
             print "limits_lower:"
@@ -526,6 +577,7 @@ class SawyerPlanner:
 
             time_start = rospy.get_time()
             # status = self.go_to_goal([None], numpy.array([1.0, 0.0, 0.0]), self.go_to_goal_offset)
+            rospy.sleep(2.0)
             status = self.go_to_goal([None], numpy.array([None]), self.go_to_goal_offset)
             elapsed_time = rospy.get_time() - time_start
             if status == 0:
@@ -949,13 +1001,17 @@ class SawyerPlanner:
                 goal_off = goal - offset * self.normalize(to_goal)
 
         start_distance = numpy.linalg.norm(goal_off - self.ee_position)
+        start_position = copy(self.ee_position)
         # while numpy.linalg.norm(goal_off - self.ee_position) > 0.01 and not rospy.is_shutdown():
         while numpy.linalg.norm(goal - self.ee_position) > 0.005 and not rospy.is_shutdown():
             # rospy.loginfo_throttle(0.5, "goal_off: " + str(goal_off))
             # print("ee_position: " + str(self.ee_position))
             #print("ee_orientation: " + str(self.ee_orientation))
             if (self_goal):  # means servo'ing to a dynamic target
-                goal = deepcopy(self.goal)
+                goal_draw = 1.0 * (self.goal - start_position) + start_position
+                noise_draw = 1.0 * (self.noise - start_position) + start_position
+                goal = 1.0 * (self.goal - start_position) + start_position
+                noise = 1.0 * (self.noise - start_position) + start_position
                 if 1:
                 # if self.sim:
                     if CONTINUOUS_NOISE:
@@ -964,7 +1020,9 @@ class SawyerPlanner:
                         # z_noise = numpy.random.normal(0.0, 0.02)
                         # lin_step = min(1 - numpy.linalg.norm(self.ee_position - goal) / start_distance, 1.0) 
                         # noise_vec = self.lin_point(goal, goal + self.noise, lin_step)
-                        noise_vec = min(lin_step, 1.0) * ((goal + self.noise) - goal) + goal
+                        # noise_vec = min(lin_step, 1.0) * ((goal + self.noise) - goal) + goal
+                        noise_vec_draw = min(lin_step, 1.0) * (noise_draw - goal_draw) + goal_draw
+                        noise_vec = min(lin_step, 1.0) * (noise - goal) + goal
                         lin_step += 0.0015
                         # noise_vec = self.lin_point(goal, self.noise, )
                         # goal += numpy.asarray(noise_vec)
@@ -973,6 +1031,7 @@ class SawyerPlanner:
                         print("lin_step: " + str(lin_step))
                         print("goal: " + str(goal))
                         print("goal + self.noise: " + str(goal + self.noise))
+                        goal_draw = copy(noise_vec_draw)
                         goal = copy(noise_vec)
                         # draw_point_msg = Point(goal[0], goal[1], goal[2])
                         # self.draw_point_srv(draw_point_msg)
@@ -987,7 +1046,7 @@ class SawyerPlanner:
                     # rospy.loginfo_throttle(0.5, "self.noise_array" + str(self.noise_array))
                 self.recovery_trajectory.append(copy(self.manipulator_joints))
 
-            draw_point_msg = Point(goal[0], goal[1], goal[2])
+            draw_point_msg = Point(goal_draw[0], goal_draw[1], goal_draw[2])
             self.draw_point_srv(draw_point_msg)
             # rospy.loginfo_throttle(0.5, "ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
             rospy.loginfo("ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
@@ -1059,13 +1118,14 @@ class SawyerPlanner:
 
         iters = 10
         rad_step = 2 * numpy.pi / float(iters)
-        for it in range(iters):
+        for it in range(1):
+        # for it in range(iters)[::-1]:
             # rad = rad_step * it + (numpy.pi / 2)
-            # rad = rad_step * it + numpy.pi
-            rad = rad_step * it
+            rad = rad_step * it + numpy.pi
+            # rad = rad_step * it
             print rad
-            x = 0.15 * math.cos(rad)
-            y = 0.15 * math.sin(rad)
+            x = 0.25 * math.cos(rad)
+            y = 0.25 * math.sin(rad)
 
             if goal[0] == None:
                 goal = copy(self.goal)
@@ -1100,6 +1160,7 @@ class SawyerPlanner:
             
             resp = self.check_ray_srv(self.pose_to_ros_msg(goal_off_pose))
             print(resp.collision)
+            resp.collision = False
             if not resp.collision:
 
                 plan_pose_msg = Pose()
