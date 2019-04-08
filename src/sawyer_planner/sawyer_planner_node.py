@@ -774,8 +774,9 @@ class SawyerPlanner:
             tasks_msg = PoseArray()
             for goal in goals:
                 # T = openravepy.transformLookat(goal + [0.1, 0.0, 0.0], goal - [self.starting_position_offset, 0.0, 0.0], [0, 0, -1])
-                T = openravepy.transformLookat(goal + [0.0, 0.1, 0.0], goal, [0, 0, -1])
-                T = numpy.dot(T, numpy.linalg.inv(self.T_G2EE))
+                T = openravepy.transformLookat(goal, goal - [0.25, 0.0, 0.0], [0, 0, -1])
+                # T = openravepy.transformLookat(goal + [0.1, 0.0, 0.0], goal, [0, 0, -1])
+                # T = numpy.dot(T, numpy.linalg.inv(self.T_G2EE))
                 pose = openravepy.poseFromMatrix(T)
                 pose_msg = Pose()
                 pose_msg.orientation.w = pose[0]
@@ -803,9 +804,9 @@ class SawyerPlanner:
             self.goal_off = self.goal
             self.noise = numpy.asarray(self.sequenced_noise[self.current_apples_ind])
 
-            # self.starting_position = self.goal - numpy.array([-self.starting_position_offset, 0.0, 0.0]);
-            self.starting_position = self.goal - numpy.array([0.0, 0.1, 0.0]);
-            self.starting_direction = numpy.array([0.0, 1.0, 0.0])
+            self.starting_position = self.goal - numpy.array([0.25, 0.0, 0.0]);
+            # self.starting_position = self.goal - numpy.array([0.0, 0.1, 0.0]);
+            self.starting_direction = numpy.array([1.0, 0.0, 0.0])
         # else:
         #     self.goal = numpy.array(self.sequenced_goals[self.current_apples_ind])
         #     self.goal_off = self.goal - self.go_to_goal_offset * self.normalize(self.goal - self.ee_position)
@@ -1026,11 +1027,11 @@ class SawyerPlanner:
                         lin_step += 0.0015
                         # noise_vec = self.lin_point(goal, self.noise, )
                         # goal += numpy.asarray(noise_vec)
-                        print("noise_vec: " + str(noise_vec))
-                        print("self.noise " + str(self.noise))
-                        print("lin_step: " + str(lin_step))
-                        print("goal: " + str(goal))
-                        print("goal + self.noise: " + str(goal + self.noise))
+                        # print("noise_vec: " + str(noise_vec))
+                        # print("self.noise " + str(self.noise))
+                        # print("lin_step: " + str(lin_step))
+                        # print("goal: " + str(goal))
+                        # print("goal + self.noise: " + str(goal + self.noise))
                         goal_draw = copy(noise_vec_draw)
                         goal = copy(noise_vec)
                         # draw_point_msg = Point(goal[0], goal[1], goal[2])
@@ -1048,8 +1049,8 @@ class SawyerPlanner:
 
             draw_point_msg = Point(goal_draw[0], goal_draw[1], goal_draw[2])
             self.draw_point_srv(draw_point_msg)
-            # rospy.loginfo_throttle(0.5, "ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
-            rospy.loginfo("ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
+            rospy.loginfo_throttle(0.5, "ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
+            # rospy.loginfo("ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
             # rospy.loginfo_throttle(0.5, "[distance calc] ee_position: " + str(self.ee_position))
             # rospy.loginfo_throttle(0.5, "[distance calc] goal: " + str(goal))
 
@@ -1159,8 +1160,8 @@ class SawyerPlanner:
             goal_off_camera = T_EE[:3, 3]
             
             resp = self.check_ray_srv(self.pose_to_ros_msg(goal_off_pose))
-            print(resp.collision)
-            resp.collision = False
+            # print(resp.collision)
+            # resp.collision = False
             if not resp.collision:
 
                 plan_pose_msg = Pose()
