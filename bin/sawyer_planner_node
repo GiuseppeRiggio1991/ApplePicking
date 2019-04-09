@@ -10,6 +10,7 @@ import openravepy
 import pyquaternion
 
 LOGGING = True
+USE_RGB_SEG = False
 # sequencing_metrics = ['hybrid', 'euclidean', 'fredsmp']
 # sequencing_metrics = ['fredsmp', 'euclidean']
 sequencing_metrics = ['euclidean']
@@ -138,12 +139,15 @@ if __name__ == "__main__":
             rospy.loginfo("STARTING EXPERIMENT " + str(i))
             rand_int = random.randint(0, len(solutions) - 1)
             last_joints = solutions[rand_int].position
-            goal_array, noise_array = gen_goal_and_noise_arrays(planner, num_targets)
+            if not USE_RGB_SEG:
+                goal_array, noise_array = gen_goal_and_noise_arrays(planner, num_targets)
             for metric in sequencing_metrics:
                 rospy.loginfo("METRIC: " + metric)
                 still_running = True
-                planner = sawyer_planner_node.SawyerPlanner(metric, sim, goal_array, noise_array, last_joints, robot_name=robot_name)
-                # planner = sawyer_planner_node.SawyerPlanner(metric, sim, [], [], last_joints, robot_name=robot_name)
+                if not USE_RGB_SEG:
+                    planner = sawyer_planner_node.SawyerPlanner(metric, sim, goal_array, noise_array, last_joints, robot_name=robot_name)
+                else:
+                    planner = sawyer_planner_node.SawyerPlanner(metric, sim, [], [], last_joints, robot_name=robot_name, rgb_seg=USE_RGB_SEG)
                 while still_running and not rospy.is_shutdown():
                     # print(planner.goal_array)
                     # planner.sequence_goals()
@@ -153,7 +157,7 @@ if __name__ == "__main__":
             # last_joints = planner.manipulator_joints
     else:
         metric = 'euclidean'
-        planner = sawyer_planner_node.SawyerPlanner(metric, sim, robot_name=robot_name)
+        planner = sawyer_planner_node.SawyerPlanner(metric, sim, robot_name=robot_name, rgb_seg=USE_RGB_SEG)
         while still_running and not rospy.is_shutdown():
             # print(planner.goal_array)
             # planner.sequence_goals()
