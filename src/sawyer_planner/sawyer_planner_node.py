@@ -44,12 +44,13 @@ HOME_POSE = True
 
 class SawyerPlanner:
 
-    def __init__(self, metric, sim=False, goal_array=[], noise_array=[], last_joints=[], robot_name="sawyer"):
+    def __init__(self, metric, sim=False, goal_array=[], noise_array=[], last_joints=[], robot_name="sawyer", rgb_seg=False):
 
         self.robot_name = robot_name
         print self.robot_name
         self.STATE = enum.Enum('STATE', 'SEARCH TO_NEXT APPROACH GRAB CHECK_GRASPING TO_DROP DROP RECOVER')
         self.sim = sim
+        self.rgb_seg = rgb_seg
 
         self.goal = [None]
         self.goal_not_offset = None
@@ -196,8 +197,9 @@ class SawyerPlanner:
             # rospy.loginfo("self.noise_array: ")
             # rospy.loginfo(str(self.noise_array))
 
-            self.goal_array = copy(goal_array)
-            self.noise_array = copy(noise_array) + self.goal_array
+            if not rgb_seg:
+                self.goal_array = copy(goal_array)
+                self.noise_array = copy(noise_array) + self.goal_array
 
             # self.goal_array = [[0.75, -0.3, 0.62]]
             # self.goal_array = [[0.45, 0.0, 0.62]]
@@ -209,20 +211,21 @@ class SawyerPlanner:
             #     cut_point_pose[:3,3] = numpy.transpose([cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
             #     cut_point_pose = numpy.dot(self.ee_pose, cut_point_pose)
             #     self.goal_array = [cut_point_pose[:3,3]]
-            if 0:
+            else:
+            # if 0:
                 T_off = numpy.array([
                             [1.0, 0.0, 0.0, -0.025],
                             [0.0, 1.0, 0.0, 0.0],
                             [0.0, 0.0, 1.0, -0.01],
                             [0.0, 0.0, 0.0, 1.0]
                             ])
-                if 0:
+                if 1:
                     rospy.set_param('segment_color', 'red')
                     cut_point_msg = self.cut_point_srv.call()
                     print('cut_point_msg.cut_point: ' + str(cut_point_msg.cut_point))
                     cut_point_pose = numpy.identity(4)
                     cut_point_pose[:3,3] = numpy.transpose([cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
-                if 1:
+                if 0:
                     cut_point_pose = numpy.identity(4)
                     cut_point_pose[:3,3] = numpy.transpose([0.026 + 0.015, 0.0, 0.171 + 0.2])
                     # cut_point_pose[:3,3] = numpy.transpose([0.0426 - 0.02, 0.063, 0.167 + 0.2])
@@ -230,13 +233,13 @@ class SawyerPlanner:
                 cut_point_pose = numpy.dot(self.ee_pose, cut_point_pose)
                 self.goal_array = [cut_point_pose[:3,3]]
 
-                if 0:
+                if 1:
                     rospy.set_param('segment_color', 'blue')
                     cut_point_msg = self.cut_point_srv.call()
                     print('noise_cut_point_msg.cut_point: ' + str(cut_point_msg.cut_point))
                     noise_cut_point_pose = numpy.identity(4)
                     noise_cut_point_pose[:3,3] = numpy.transpose([cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
-                if 1:
+                if 0:
                     noise_cut_point_pose = numpy.identity(4)
                     noise_cut_point_pose[:3,3] = numpy.transpose([0.0426 + 0.015, 0.063, 0.167 + 0.2])
                     # noise_cut_point_pose[:3,3] = numpy.transpose([0.026 - 0.02, 0.0, 0.171 + 0.2])
@@ -267,33 +270,33 @@ class SawyerPlanner:
         else:
             # self.goal_array = [[0.45, -0.3, 0.62]]
             # self.noise_array = [[0.0, 0.0, 0.0]]
-            if 0:
+            if 1:
                 T_off = numpy.array([
                             [1.0, 0.0, 0.0, -0.025],
                             [0.0, 1.0, 0.0, 0.0],
                             [0.0, 0.0, 1.0, -0.01],
                             [0.0, 0.0, 0.0, 1.0]
                             ])
-                if 0:
+                if 1:
                     rospy.set_param('segment_color', 'red')
                     cut_point_msg = self.cut_point_srv.call()
                     print('cut_point_msg.cut_point: ' + str(cut_point_msg.cut_point))
                     cut_point_pose = numpy.identity(4)
                     cut_point_pose[:3,3] = numpy.transpose([cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
-                if 1:
+                if 0:
                     cut_point_pose = numpy.identity(4)
                     cut_point_pose[:3,3] = numpy.transpose([0.026, 0.0, 0.171])
                 cut_point_pose = numpy.dot(T_off, cut_point_pose)
                 cut_point_pose = numpy.dot(self.ee_pose, cut_point_pose)
                 self.goal_array = [cut_point_pose[:3,3]]
 
-                if 0:
+                if 1:
                     rospy.set_param('segment_color', 'blue')
                     cut_point_msg = self.cut_point_srv.call()
                     print('noise_cut_point_msg.cut_point: ' + str(cut_point_msg.cut_point))
                     noise_cut_point_pose = numpy.identity(4)
                     noise_cut_point_pose[:3,3] = numpy.transpose([cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
-                if 1:
+                if 0:
                     noise_cut_point_pose = numpy.identity(4)
                     noise_cut_point_pose[:3,3] = numpy.transpose([0.0426, 0.063, 0.167])
                 noise_cut_point_pose = numpy.dot(T_off, noise_cut_point_pose)
@@ -314,7 +317,7 @@ class SawyerPlanner:
                 # joints_pos = numpy.array(joint_states.position)
             elif rospy.get_param('/robot_name') == "ur5" or rospy.get_param('/robot_name') == "ur10":
                 import socket
-                HOST = "192.168.0.101"    # The remote host
+                HOST = "10.42.0.2"    # The remote host
                 PORT = 30002              # The same port as used by the server
                 self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.s.connect((HOST, PORT))
@@ -333,6 +336,7 @@ class SawyerPlanner:
         # self.socket_handler = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         # self.socket_handler.settimeout(2.0)
         # self.socket_handler.connect((TCP_IP, TCP_PORT))
+
 
 
         # rospy.Timer(rospy.Duration(0.05), self.socket_handshake)
@@ -1117,10 +1121,19 @@ class SawyerPlanner:
 
     def plan_to_goal(self, goal = [None], to_goal = [None], offset = 0.13, ignore_trellis=False):
 
-        iters = 10
+        iters = 16
         rad_step = 2 * numpy.pi / float(iters)
-        for it in range(1):
-        # for it in range(iters)[::-1]:
+        if self.rgb_seg:
+            iter_arr = range(iters)[::-1]
+        else:
+            iter_arr = range(1)
+
+        goal_locations = []
+        goal_poses = []
+
+        # This for loop "circles" around the
+
+        for it in iter_arr:
             # rad = rad_step * it + (numpy.pi / 2)
             rad = rad_step * it + numpy.pi
             # rad = rad_step * it
@@ -1158,10 +1171,25 @@ class SawyerPlanner:
 
             # goal_off_camera = T_C[:3, 3]
             goal_off_camera = T_EE[:3, 3]
-            
-            resp = self.check_ray_srv(self.pose_to_ros_msg(goal_off_pose))
+
+            goal_locations.append(goal_off_camera)
+            goal_poses.append(goal_off_pose)
+
+        sorting_func = lambda i: (-numpy.dot(goal - goal_locations[i], goal))
+        indexer = range(len(goal_locations))
+        indexer.sort(key=sorting_func)
+
+        for index in indexer:
+
+            goal_off_camera = goal_locations[index]
+            goal_off_pose = goal_poses[index]
+
+            pos = self.pose_to_ros_msg(goal_off_pose)
+
+            resp = self.check_ray_srv(pos)
             # print(resp.collision)
             # resp.collision = False
+
             if not resp.collision:
 
                 plan_pose_msg = Pose()
