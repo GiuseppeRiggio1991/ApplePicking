@@ -1,0 +1,23 @@
+<launch>
+    <!-- Launches some of the base utils needed to get the planner to run -->
+    <arg name="sim" default="true" />
+    <arg name="ip" default="127.0.0.1" />
+    <arg name="robot" default="ur5" />
+
+    <group unless="$(arg sim)">
+        <include file="$(find ur_modern_driver)/launch/ur5e_bringup.launch">
+            <arg name="robot_ip" value="$(arg ip)" />
+        </include>
+        <include file="$(find localisation)/launch/localisation.launch">
+            <arg name="robot_name" value="$(arg robot)" />
+        </include>
+    </group>
+    <group if="$(arg sim)">
+        <include file="$(find localisation)/launch/localisation_sim.launch">
+            <arg name="robot_name" value="$(arg robot)" />
+        </include>
+    </group>
+    <include file="$(find realsense2_camera)/launch/rs_rgbd.launch" />
+    <include file="$(find rgb_segmentation)/launch/rgb_segmentation.launch" />
+
+</launch>

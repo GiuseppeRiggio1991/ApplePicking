@@ -44,13 +44,12 @@ HOME_POSE = True
 
 class SawyerPlanner:
 
-    def __init__(self, metric, sim=False, goal_array=[], noise_array=[], last_joints=[], robot_name="sawyer", rgb_seg=False):
+    def __init__(self, metric, sim=False, goal_array=[], noise_array=[], last_joints=[], robot_name="sawyer"):
 
         self.robot_name = robot_name
         print self.robot_name
         self.STATE = enum.Enum('STATE', 'SEARCH TO_NEXT APPROACH GRAB CHECK_GRASPING TO_DROP DROP RECOVER')
         self.sim = sim
-        self.rgb_seg = rgb_seg
 
         self.goal = [None]
         self.goal_not_offset = None
@@ -85,6 +84,11 @@ class SawyerPlanner:
         self.environment_setup()
         self.robot_arm_indices = self.robot.GetActiveManipulator().GetArmIndices()
         self.num_joints = len(self.robot_arm_indices)
+
+        # Segmentation logic
+        self.target_color = rospy.get_param('/target_color', 'blue')
+        self.noise_color = rospy.get_param('/noise_color', False)
+        self.rgb_seg = bool(self.target_color)
 
         # self.joint_names = ['right_j0', 'right_j1', 'right_j2', 'right_j3', 'right_j4', 'right_j5', 'right_j6']
 
@@ -145,6 +149,9 @@ class SawyerPlanner:
         self.check_ray_srv = rospy.ServiceProxy('test_check_ray', CheckRay)
         self.cut_point_srv = rospy.ServiceProxy('cut_point_srv', GetCutPoint)
 
+        self.load_octomap = rospy.ServiceProxy('/load_octomap', Empty)
+        self.update_octomap = rospy.ServiceProxy('/update_octomap', Empty)
+
         time.sleep(0.5)
         
         #self.enable_bridge_pub.publish(Bool(True))
@@ -197,7 +204,7 @@ class SawyerPlanner:
             # rospy.loginfo("self.noise_array: ")
             # rospy.loginfo(str(self.noise_array))
 
-            if not rgb_seg:
+            if not self.rgb_seg:
                 self.goal_array = copy(goal_array)
                 self.noise_array = copy(noise_array) + self.goal_array
 
@@ -213,40 +220,7 @@ class SawyerPlanner:
             #     self.goal_array = [cut_point_pose[:3,3]]
             else:
             # if 0:
-                T_off = numpy.array([
-                            [1.0, 0.0, 0.0, -0.025],
-                            [0.0, 1.0, 0.0, 0.0],
-                            [0.0, 0.0, 1.0, -0.01],
-                            [0.0, 0.0, 0.0, 1.0]
-                            ])
-                if 1:
-                    rospy.set_param('segment_color', 'red')
-                    cut_point_msg = self.cut_point_srv.call()
-                    print('cut_point_msg.cut_point: ' + str(cut_point_msg.cut_point))
-                    cut_point_pose = numpy.identity(4)
-                    cut_point_pose[:3,3] = numpy.transpose([cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
-                if 0:
-                    cut_point_pose = numpy.identity(4)
-                    cut_point_pose[:3,3] = numpy.transpose([0.026 + 0.015, 0.0, 0.171 + 0.2])
-                    # cut_point_pose[:3,3] = numpy.transpose([0.0426 - 0.02, 0.063, 0.167 + 0.2])
-                cut_point_pose = numpy.dot(T_off, cut_point_pose)
-                cut_point_pose = numpy.dot(self.ee_pose, cut_point_pose)
-                self.goal_array = [cut_point_pose[:3,3]]
-
-                if 1:
-                    rospy.set_param('segment_color', 'blue')
-                    cut_point_msg = self.cut_point_srv.call()
-                    print('noise_cut_point_msg.cut_point: ' + str(cut_point_msg.cut_point))
-                    noise_cut_point_pose = numpy.identity(4)
-                    noise_cut_point_pose[:3,3] = numpy.transpose([cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
-                if 0:
-                    noise_cut_point_pose = numpy.identity(4)
-                    noise_cut_point_pose[:3,3] = numpy.transpose([0.0426 + 0.015, 0.063, 0.167 + 0.2])
-                    # noise_cut_point_pose[:3,3] = numpy.transpose([0.026 - 0.02, 0.0, 0.171 + 0.2])
-                noise_cut_point_pose = numpy.dot(T_off, noise_cut_point_pose)
-                noise_cut_point_pose = numpy.dot(self.ee_pose, noise_cut_point_pose)
-                # self.noise_array = numpy.asarray(noise_cut_point_pose[:3,3]).reshape(1,3) - numpy.asarray(cut_point_pose[:3,3]).reshape(1,3)
-                self.noise_array = numpy.asarray(noise_cut_point_pose[:3,3]).reshape(1,3)
+                self.rgb_segment_goal_and_noise()
                 print('noise_array: ' + str(self.noise_array))
             # self.noise_array = [[ 0.0, 0.0, 0.0]]  # joint limits
             # self.goal_array = [[ 0.91032737, -0.07162992 , 0.18117678]]  # joint limits
@@ -268,41 +242,8 @@ class SawyerPlanner:
 
         # if not self.sim:
         else:
-            # self.goal_array = [[0.45, -0.3, 0.62]]
-            # self.noise_array = [[0.0, 0.0, 0.0]]
             if 1:
-                T_off = numpy.array([
-                            [1.0, 0.0, 0.0, -0.025],
-                            [0.0, 1.0, 0.0, 0.0],
-                            [0.0, 0.0, 1.0, -0.01],
-                            [0.0, 0.0, 0.0, 1.0]
-                            ])
-                if 1:
-                    rospy.set_param('segment_color', 'red')
-                    cut_point_msg = self.cut_point_srv.call()
-                    print('cut_point_msg.cut_point: ' + str(cut_point_msg.cut_point))
-                    cut_point_pose = numpy.identity(4)
-                    cut_point_pose[:3,3] = numpy.transpose([cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
-                if 0:
-                    cut_point_pose = numpy.identity(4)
-                    cut_point_pose[:3,3] = numpy.transpose([0.026, 0.0, 0.171])
-                cut_point_pose = numpy.dot(T_off, cut_point_pose)
-                cut_point_pose = numpy.dot(self.ee_pose, cut_point_pose)
-                self.goal_array = [cut_point_pose[:3,3]]
-
-                if 1:
-                    rospy.set_param('segment_color', 'blue')
-                    cut_point_msg = self.cut_point_srv.call()
-                    print('noise_cut_point_msg.cut_point: ' + str(cut_point_msg.cut_point))
-                    noise_cut_point_pose = numpy.identity(4)
-                    noise_cut_point_pose[:3,3] = numpy.transpose([cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
-                if 0:
-                    noise_cut_point_pose = numpy.identity(4)
-                    noise_cut_point_pose[:3,3] = numpy.transpose([0.0426, 0.063, 0.167])
-                noise_cut_point_pose = numpy.dot(T_off, noise_cut_point_pose)
-                noise_cut_point_pose = numpy.dot(self.ee_pose, noise_cut_point_pose)
-                # self.noise_array = numpy.asarray(noise_cut_point_pose[:3,3]).reshape(1,3) - numpy.asarray(cut_point_pose[:3,3]).reshape(1,3)
-                self.noise_array = numpy.asarray(noise_cut_point_pose[:3,3]).reshape(1,3)
+                self.rgb_segment_goal_and_noise()
                 print('noise_array: ' + str(self.noise_array))
             if rospy.get_param('/robot_name') == "sawyer":
                 # from intera_core_msgs.msg import EndpointState, JointLimits
@@ -408,6 +349,51 @@ class SawyerPlanner:
     # def socket_handshake(self, *args):
     #     self.socket_handler.send("\n")
 
+    def rgb_segment_goal_and_noise(self):
+
+        T_off = numpy.array([
+            [1.0, 0.0, 0.0, -0.025],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, -0.01],
+            [0.0, 0.0, 0.0, 1.0]
+        ])
+
+        self.goal_array = []
+
+        rospy.set_param('segment_color', self.target_color)
+        cut_points_msg = self.cut_point_srv.call()
+
+        print('{} points of interest found!'.format(len(cut_points_msg.cut_points.poses)))
+        for cut_pose in cut_points_msg.cut_points.poses:
+            cut_point = cut_pose.position
+            cut_point_pose = numpy.identity(4)
+            cut_point_pose[:3, 3] = numpy.transpose([cut_point.x, cut_point.y, cut_point.z])
+            cut_point_pose = numpy.dot(T_off, cut_point_pose)
+            cut_point_pose = numpy.dot(self.ee_pose, cut_point_pose)
+            self.goal_array.append(cut_point_pose[:3, 3])
+
+        # if self.noise_color and len(self.goal_array) == 1:
+        #
+        #
+        #
+        #     rospy.set_param('segment_color', self.noise_color)
+        #     cut_point_msg = self.cut_point_srv.call()
+        #     print('noise_cut_point_msg.cut_point: ' + str(cut_point_msg.cut_point))
+        #     noise_cut_point_pose = numpy.identity(4)
+        #     noise_cut_point_pose[:3, 3] = numpy.transpose(
+        #         [cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
+        #     noise_cut_point_pose = numpy.dot(T_off, noise_cut_point_pose)
+        #     noise_cut_point_pose = numpy.dot(self.ee_pose, noise_cut_point_pose)
+        #     self.noise_array = numpy.asarray(noise_cut_point_pose[:3, 3]).reshape(1, 3)
+
+        if self.noise_color:
+            rospy.logwarn('Warning: Noise color based segmentation is temporarily disabled.')
+        else:
+            print('Not using any noise-based color segmentation')
+
+        self.noise_array = self.goal_array[:]  # Shallow copy, shouldn't be modifying arrays inside?
+
+
     def computeManipulability(self):
 
         # current_joints_pos = self.arm.joint_angles()
@@ -489,6 +475,9 @@ class SawyerPlanner:
             #    resp = self.start_pipeline_client.call(pipeline_srv)
 
             # wait???
+
+            self.update_octomap()
+            self.load_octomap()
 
             self.state = self.STATE.TO_NEXT
         
@@ -629,7 +618,6 @@ class SawyerPlanner:
             rospy.loginfo("CHECK_GRASPING")
 
             self.remove_current_apple()
-                # del self.goal_array[0]
 
             # if resp.apple_is_there:
             # if 0:
@@ -1175,7 +1163,8 @@ class SawyerPlanner:
             goal_locations.append(goal_off_camera)
             goal_poses.append(goal_off_pose)
 
-        sorting_func = lambda i: (-numpy.dot(goal - goal_locations[i], goal))
+        # Prioritize approaches which are in line with the vector from the base to the goal
+        sorting_func = lambda i: (-numpy.dot(goal - goal_locations[i], goal) / (numpy.linalg.norm(goal - goal_locations[i]) * numpy.linalg.norm(goal)))
         indexer = range(len(goal_locations))
         indexer.sort(key=sorting_func)
 

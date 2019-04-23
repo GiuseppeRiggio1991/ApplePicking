@@ -1,4 +1,10 @@
 <launch>
+    <arg name="target_color" default="blue" />
+    <arg name="noise_color" default="false" />
+
+    <param name="/target_color" value="$(arg target_color)" />
+    <param name="/noise_color" value="$(arg noise_color)" />
+
     <node name="sawyer_planner" pkg="sawyer_planner" type="sawyer_planner" output="screen">
         <rosparam command="load" file="$(find sawyer_planner)/params/sawyer_planner_params.yaml"/>
     </node>
