@@ -20,4 +20,6 @@
     <include file="$(find realsense2_camera)/launch/rs_rgbd.launch" />
     <include file="$(find rgb_segmentation)/launch/rgb_segmentation.launch" />
 
+    <include file="$(find sawyer_planner)/launch/pcl_filter_nodelet.launch" />
+
 </launch>

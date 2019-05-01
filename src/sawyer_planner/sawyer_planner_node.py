@@ -54,6 +54,8 @@ class SawyerPlanner:
         self.goal = [None]
         self.goal_not_offset = None
         self.goal_array = []
+        self.goal_point_camera_pose = []  # Records the pose originally used for goal - ONLY FOR SIMULATION
+
         self.sequenced_goals = []
         self.sequenced_trajectories = []
         self.manipulator_joints = []
@@ -130,6 +132,13 @@ class SawyerPlanner:
         #            ])
         # self.robot.SetDOFLimits(self.joint_limits_lower, self.joint_limits_upper, self.robot.GetActiveManipulator().GetArmIndices())
 
+        self.camera_offset_matrix = numpy.array([
+            [1.0, 0.0, 0.0, -0.025],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, -0.01],
+            [0.0, 0.0, 0.0, 1.0]
+        ])
+
         # rospy.Subscriber("/sawyer_planner/goal", Point, self.get_goal, queue_size = 1)
         rospy.Subscriber("/sawyer_planner/goal_array", Float32MultiArray, self.get_goal_array, queue_size = 1)
         self.enable_bridge_pub = rospy.Publisher("/sawyer_planner/enable_bridge", Bool, queue_size = 1)
@@ -151,6 +160,7 @@ class SawyerPlanner:
 
         self.load_octomap = rospy.ServiceProxy('/load_octomap', Empty)
         self.update_octomap = rospy.ServiceProxy('/update_octomap', Empty)
+        self.update_octomap_filtered = rospy.ServiceProxy('/update_octomap_filtered', Empty)
 
         time.sleep(0.5)
         
@@ -351,26 +361,22 @@ class SawyerPlanner:
 
     def rgb_segment_goal_and_noise(self):
 
-        T_off = numpy.array([
-            [1.0, 0.0, 0.0, -0.025],
-            [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, -0.01],
-            [0.0, 0.0, 0.0, 1.0]
-        ])
-
         self.goal_array = []
 
         rospy.set_param('segment_color', self.target_color)
         cut_points_msg = self.cut_point_srv.call()
 
         print('{} points of interest found!'.format(len(cut_points_msg.cut_points.poses)))
+        camera_pose = numpy.dot(self.ee_pose, self.camera_offset_matrix)
+
         for cut_pose in cut_points_msg.cut_points.poses:
             cut_point = cut_pose.position
             cut_point_pose = numpy.identity(4)
             cut_point_pose[:3, 3] = numpy.transpose([cut_point.x, cut_point.y, cut_point.z])
-            cut_point_pose = numpy.dot(T_off, cut_point_pose)
-            cut_point_pose = numpy.dot(self.ee_pose, cut_point_pose)
-            self.goal_array.append(cut_point_pose[:3, 3])
+            cut_point_pose_world = numpy.dot(camera_pose, cut_point_pose)
+            self.goal_array.append(cut_point_pose_world[:3, 3])
+
+        self.goal_point_camera_pose = camera_pose
 
         # if self.noise_color and len(self.goal_array) == 1:
         #
@@ -476,9 +482,7 @@ class SawyerPlanner:
 
             # wait???
 
-            self.update_octomap()
-            self.load_octomap()
-
+            self.refresh_octomap()
             self.state = self.STATE.TO_NEXT
         
         elif self.state == self.STATE.TO_NEXT:
@@ -545,6 +549,8 @@ class SawyerPlanner:
 
             rospy.loginfo("APPROACH")
 
+            # When running on a real arm, a new position means new occlusions will be present!
+            self.refresh_octomap(self.goal)
             #start = time.time()
 
             #while (self.goal[0] == None) and (time.time() - start < 20.0) :
@@ -821,6 +827,7 @@ class SawyerPlanner:
                 msg.pose.position.y,
                 msg.pose.position.z]
         pose = openravepy.matrixFromPose(pose)
+
         self.ee_pose = copy(pose)
         # ee_pose = numpy.dot(pose, self.T_G2EE)
         # ee_pose = openravepy.poseFromMatrix(ee_pose)
@@ -1125,7 +1132,6 @@ class SawyerPlanner:
             # rad = rad_step * it + (numpy.pi / 2)
             rad = rad_step * it + numpy.pi
             # rad = rad_step * it
-            print rad
             x = 0.25 * math.cos(rad)
             y = 0.25 * math.sin(rad)
 
@@ -1168,6 +1174,8 @@ class SawyerPlanner:
         indexer = range(len(goal_locations))
         indexer.sort(key=sorting_func)
 
+        self.refresh_octomap(self.goal)  # Filters out the points around the goal to avoid erroneous collisions
+
         for index in indexer:
 
             goal_off_camera = goal_locations[index]
@@ -1195,7 +1203,7 @@ class SawyerPlanner:
                     resp = self.optimise_offset_client(self.sequenced_trajectories[self.current_apples_ind], True)
                 elif self.sequencing_metric == 'euclidean':
                     # resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, self.sim)
-                    resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, True)
+                    resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, True)   # Moves it into place
 
                 if not resp.success:
                     rospy.logwarn("planning to next target failed")
@@ -1353,6 +1361,48 @@ class SawyerPlanner:
         to_goal = self.normalize(numpy.array([0.87758256189, 0.0, -0.4794255386]))
 
         self.plan_to_goal(self.starting_position, to_goal, 0.0)
+
+
+    def refresh_octomap(self, point = None, camera_frame=False):
+        if point is None:
+            self.update_octomap()
+            self.load_octomap()
+        else:
+
+            # If camera_frame is False, point should be expressed in terms of the global coordinates
+            # (or the robot base if the robot is not moving)
+            if not camera_frame:
+                if self.sim:
+                    # Even though the arm moves before approaching the target, for our sim, the camera stays still
+                    # Hence we record the original position of the camera and pretend the camera stays fixed
+                    # and filter out the goal points in the original frame
+                    camera_pose = self.goal_point_camera_pose
+
+                else:
+                    # Otherwise, in a real implementation, the camera moves with the arm
+                    # Therefore we need to express the goal points in the view of the new position of the camera
+                    # so that we can properly filter out the octomap
+                    camera_pose = numpy.dot(self.ee_pose, self.camera_offset_matrix)
+
+                goal_point_world_mat = numpy.identity(4)
+                goal_point_world_mat[0:3, 3] = point
+                goal_point_camera_mat = numpy.dot(numpy.linalg.inv(camera_pose), goal_point_world_mat)
+                goal_point_camera = goal_point_camera_mat[0:3, 3]
+            else:
+                goal_point_camera = point
+
+            rospy.set_param('/goal_x', goal_point_camera[0].item())
+            rospy.set_param('/goal_y', goal_point_camera[1].item())
+            rospy.set_param('/goal_z', goal_point_camera[2].item())
+
+            self.update_octomap_filtered()
+
+        # TODO: BUG: Load_octomap for simulation will refresh the octomap in reference to the current camera position,
+        # however for simulation it should refresh it with respect to the original camera position
+        self.load_octomap()
+        rospy.set_param('/goal_x', False)
+        rospy.set_param('/goal_y', False)
+        rospy.set_param('/goal_z', False)
 
 
     def clean(self):
