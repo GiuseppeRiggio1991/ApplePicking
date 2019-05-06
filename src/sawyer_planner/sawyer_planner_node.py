@@ -90,7 +90,7 @@ class SawyerPlanner:
         # Segmentation logic
         self.target_color = rospy.get_param('/target_color', 'blue')
         self.noise_color = rospy.get_param('/noise_color', False)
-        self.rgb_seg = bool(self.target_color)
+        self.rgb_seg = rospy.get_param('/use_camera', False) and bool(self.target_color)
 
         # self.joint_names = ['right_j0', 'right_j1', 'right_j2', 'right_j3', 'right_j4', 'right_j5', 'right_j6']
 
@@ -252,9 +252,14 @@ class SawyerPlanner:
 
         # if not self.sim:
         else:
-            if 1:
+            # TODO: This section is copy and pasted from SIM section, unify
+            if not self.rgb_seg:
+                self.goal_array = copy(goal_array)
+                self.noise_array = copy(noise_array) + self.goal_array
+            else:
                 self.rgb_segment_goal_and_noise()
                 print('noise_array: ' + str(self.noise_array))
+            print('noise_array: ' + str(self.noise_array))
             if rospy.get_param('/robot_name') == "sawyer":
                 # from intera_core_msgs.msg import EndpointState, JointLimits
                 import intera_interface
@@ -268,8 +273,8 @@ class SawyerPlanner:
                 # joints_pos = numpy.array(joint_states.position)
             elif rospy.get_param('/robot_name') == "ur5" or rospy.get_param('/robot_name') == "ur10":
                 import socket
-                HOST = "10.42.0.2"    # The remote host
-                PORT = 30002              # The same port as used by the server
+                HOST = rospy.get_param('/robot_ip')   # The remote host
+                PORT = rospy.get_param('/robot_socket', 30002)              # The same port as used by the server
                 self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.s.connect((HOST, PORT))
                 current_joints_pos = copy(self.manipulator_joints)
@@ -1364,6 +1369,10 @@ class SawyerPlanner:
 
 
     def refresh_octomap(self, point = None, camera_frame=False):
+
+        if not self.rgb_seg:
+            return
+
         if point is None:
             self.update_octomap()
             self.load_octomap()

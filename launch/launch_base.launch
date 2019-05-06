@@ -3,6 +3,10 @@
     <arg name="sim" default="true" />
     <arg name="ip" default="127.0.0.1" />
     <arg name="robot" default="ur5" />
+    <arg name="use_camera" default="false" />
+
+    <param name="use_camera" value="$(arg use_camera)" />
+    <param name="robot_ip" value="$(arg ip)" />
 
     <group unless="$(arg sim)">
         <include file="$(find ur_modern_driver)/launch/ur5e_bringup.launch">
@@ -15,11 +19,15 @@
     <group if="$(arg sim)">
         <include file="$(find localisation)/launch/localisation_sim.launch">
             <arg name="robot_name" value="$(arg robot)" />
+            <arg name="use_camera" value="$(arg use_camera)" />
         </include>
     </group>
-    <include file="$(find realsense2_camera)/launch/rs_rgbd.launch" />
-    <include file="$(find rgb_segmentation)/launch/rgb_segmentation.launch" />
+    <group if="$(arg use_camera)">
+        <include file="$(find realsense2_camera)/launch/rs_rgbd.launch" />
+        <include file="$(find rgb_segmentation)/launch/rgb_segmentation.launch" />
+        <include file="$(find sawyer_planner)/launch/pcl_filter_nodelet.launch" />
+    </group>
 
-    <include file="$(find sawyer_planner)/launch/pcl_filter_nodelet.launch" />
+
 
 </launch>

@@ -10,7 +10,6 @@ import openravepy
 import pyquaternion
 
 LOGGING = True
-USE_RGB_SEG = True
 # sequencing_metrics = ['hybrid', 'euclidean', 'fredsmp']
 # sequencing_metrics = ['fredsmp', 'euclidean']
 sequencing_metrics = ['euclidean']
@@ -87,6 +86,7 @@ def gen_goal_and_noise_arrays(planner, num_targets=8):
         solutions = []
     noise_array = numpy.asarray(noise_array)
 
+
     # add Gaussian noise
     # x_noise = numpy.random.normal(0.1, 0.075, len(goal_array))
     # y_noise = numpy.random.normal(0.0, 0.075, len(goal_array))
@@ -107,6 +107,8 @@ if __name__ == "__main__":
         sim = rospy.get_param("sim")
     else:
         sim = False
+
+    USE_RGB_SEG = rospy.get_param('/use_camera', False) and rospy.get_param('/target_color', False)
 
     if rospy.has_param('/robot_name'):
         print "rospy.get_param: "
@@ -141,13 +143,14 @@ if __name__ == "__main__":
             last_joints = solutions[rand_int].position
             if not USE_RGB_SEG:
                 goal_array, noise_array = gen_goal_and_noise_arrays(planner, num_targets)
+            else:
+                goal_array = []
+                noise_array = []
+
             for metric in sequencing_metrics:
                 rospy.loginfo("METRIC: " + metric)
                 still_running = True
-                if not USE_RGB_SEG:
-                    planner = sawyer_planner_node.SawyerPlanner(metric, sim, goal_array, noise_array, last_joints, robot_name=robot_name)
-                else:
-                    planner = sawyer_planner_node.SawyerPlanner(metric, sim, [], [], last_joints, robot_name=robot_name)
+                planner = sawyer_planner_node.SawyerPlanner(metric, sim, goal_array, noise_array, last_joints, robot_name=robot_name)
                 while still_running and not rospy.is_shutdown():
                     # print(planner.goal_array)
                     # planner.sequence_goals()
