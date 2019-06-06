@@ -14,7 +14,7 @@ LOGGING = True
 # sequencing_metrics = ['fredsmp', 'euclidean']
 sequencing_metrics = ['euclidean']
 # sequencing_metrics = ['fredsmp']
-num_targets = 10
+num_targets = 2
 num_experiments = 1
 
 def transform_target_start(target, planner):
@@ -41,7 +41,7 @@ def transform_target_offset(target, planner):
     T_C = numpy.dot(T_EE, numpy.linalg.inv(planner.T_G2EE))
     return T_C
 
-def gen_goal_and_noise_arrays(planner, num_targets=8):
+def gen_goal_and_noise_arrays(planner, num_targets=1):
     # random.seed(time.time())
     # numpy.random.seed(time.time())
     goal_array = []
@@ -121,7 +121,7 @@ if __name__ == "__main__":
     last_joints = []
 
     still_running = True
-    if LOGGING and sim:
+    if sim:
         planner = sawyer_planner_node.SawyerPlanner('euclidean', sim, robot_name=robot_name)
         home_pose = [
             [-0.99, 0.04, 0.13, 0.2],
@@ -141,23 +141,20 @@ if __name__ == "__main__":
             rospy.loginfo("STARTING EXPERIMENT " + str(i))
             rand_int = random.randint(0, len(solutions) - 1)
             last_joints = solutions[rand_int].position
+            goal_array, noise_array = [], []
             if not USE_RGB_SEG:
                 goal_array, noise_array = gen_goal_and_noise_arrays(planner, num_targets)
-            else:
-                goal_array = []
-                noise_array = []
 
             for metric in sequencing_metrics:
                 rospy.loginfo("METRIC: " + metric)
                 still_running = True
                 planner = sawyer_planner_node.SawyerPlanner(metric, sim, goal_array, noise_array, last_joints, robot_name=robot_name)
                 while still_running and not rospy.is_shutdown():
-                    # print(planner.goal_array)
-                    # planner.sequence_goals()
-                    still_running = planner.update()
 
+                    still_running = planner.update()
                     rate.sleep()
-            # last_joints = planner.manipulator_joints
+        planner.go_to_start()
+
     else:
         metric = 'euclidean'
         planner = sawyer_planner_node.SawyerPlanner(metric, sim, robot_name=robot_name)
@@ -167,6 +164,9 @@ if __name__ == "__main__":
             still_running = planner.update()
 
             rate.sleep()
+
+        planner.stop_arm()
+        planner.go_to_start()
 
 
     rospy.on_shutdown(planner.clean)

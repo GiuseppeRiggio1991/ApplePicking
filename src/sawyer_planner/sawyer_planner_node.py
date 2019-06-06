@@ -4,6 +4,7 @@ import time
 import enum
 import openravepy
 import numpy
+import numpy as np
 import prpy
 import sys
 import os
@@ -17,7 +18,7 @@ import math
 
 import rospy
 import rospkg
-from geometry_msgs.msg import Point
+from geometry_msgs.msg import Point, Quaternion
 from geometry_msgs.msg import Pose
 from geometry_msgs.msg import PoseArray
 from geometry_msgs.msg import PoseStamped
@@ -25,13 +26,14 @@ from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectoryPoint
 from trajectory_msgs.msg import JointTrajectory
 from std_msgs.msg import Float32MultiArray
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
 from std_srvs.srv import SetBool, Trigger, Empty
 from sawyer_planner.srv import AppleCheck, AppleCheckRequest, AppleCheckResponse
 from online_planner.srv import *
 from task_planner.srv import *
 from localisation.srv import *
 from rgb_segmentation.srv import *
+from tf.transformations import quaternion_from_matrix
 # from task_planner.msgs import *
 
 import pyquaternion
@@ -53,7 +55,8 @@ class SawyerPlanner:
 
         self.goal = [None]
         self.goal_not_offset = None
-        self.goal_array = []
+        self.goal_array = goal_array
+        self.noise_array = noise_array + goal_array
         self.goal_point_camera_pose = []  # Records the pose originally used for goal - ONLY FOR SIMULATION
 
         self.sequenced_goals = []
@@ -91,6 +94,8 @@ class SawyerPlanner:
         self.target_color = rospy.get_param('/target_color', 'blue')
         self.noise_color = rospy.get_param('/noise_color', False)
         self.rgb_seg = rospy.get_param('/use_camera', False) and bool(self.target_color)
+        if self.rgb_seg and goal_array:
+            rospy.logwarn("You passed in a goal array despite using RGB Segmentation. Is this what you intended? Will ignore goal array input")
 
         # self.joint_names = ['right_j0', 'right_j1', 'right_j2', 'right_j3', 'right_j4', 'right_j5', 'right_j6']
 
@@ -132,12 +137,38 @@ class SawyerPlanner:
         #            ])
         # self.robot.SetDOFLimits(self.joint_limits_lower, self.joint_limits_upper, self.robot.GetActiveManipulator().GetArmIndices())
 
+
+
+        # Note: With respect to having the EE face out towards the world, the axes are:
+        # x: Right
+        # y: Down
+        # z: Out
+
+        # This is all stuff for the UR5 test cutter setup
+        # TODO: These values are taken straight from the URDF. Could be loaded in automatically
+
+        tool0_endpoint_x = 0.0          # Endpoint is not hanging to left or right
+        tool0_endpoint_y = 0.09721      # Endpoint is hanging down
+        tool0_endpoint_z = 0.24210      # Endpoint protrudes outwards
+
+        tool0_camera_x = -0.0475                        # Camera optical frame hangs out to the left - For every peg moved, add -0.015
+        tool0_camera_y = 0.085                          # Camera hangs out below the tool
+        tool0_camera_z = 0.00575 + 0.02505 - 0.0042     # Camera protrudes out: Particleboard (5.75) + Camera Forward (25.05) - Camera Depth Frame (4.2)
+
+        # What is the offset between the endpoint and the camera?
         self.camera_offset_matrix = numpy.array([
-            [1.0, 0.0, 0.0, -0.025],
-            [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, -0.01],
+            [1.0, 0.0, 0.0, tool0_camera_x - tool0_endpoint_x],
+            [0.0, 1.0, 0.0, tool0_camera_y - tool0_endpoint_y],
+            [0.0, 0.0, 1.0, tool0_camera_z - tool0_endpoint_z],
             [0.0, 0.0, 0.0, 1.0]
         ])
+        #
+        # self.camera_offset_matrix = numpy.array([
+        #     [1.0, 0.0, 0.0, -0.025],
+        #     [0.0, 1.0, 0.0, 0.0],
+        #     [0.0, 0.0, 1.0, -0.01],
+        #     [0.0, 0.0, 0.0, 1.0]
+        # ])
 
         # rospy.Subscriber("/sawyer_planner/goal", Point, self.get_goal, queue_size = 1)
         rospy.Subscriber("/sawyer_planner/goal_array", Float32MultiArray, self.get_goal_array, queue_size = 1)
@@ -148,6 +179,7 @@ class SawyerPlanner:
         self.apple_check_client = rospy.ServiceProxy("/sawyer_planner/apple_check", AppleCheck)
         self.start_pipeline_client = rospy.ServiceProxy("/sawyer_planner/start_pipeline", Trigger)
         self.plan_pose_client = rospy.ServiceProxy("/plan_pose_srv", PlanPose)
+        self.plan_joints_client = rospy.ServiceProxy("/plan_joints_srv", PlanJoints)
         self.optimise_offset_client = rospy.ServiceProxy("/optimise_offset_srv", OptimiseTrajectory)
         self.optimise_trajectory_client = rospy.ServiceProxy("/optimise_trajectory_srv", OptimiseTrajectory)
         self.sequencer_client = rospy.ServiceProxy("/sequence_tasks_srv", SequenceTasks)
@@ -157,6 +189,7 @@ class SawyerPlanner:
         self.clear_point_srv = rospy.ServiceProxy('clear_point', Empty)
         self.check_ray_srv = rospy.ServiceProxy('test_check_ray', CheckRay)
         self.cut_point_srv = rospy.ServiceProxy('cut_point_srv', GetCutPoint)
+        self.set_manipulator_srv = rospy.ServiceProxy('set_manipulator', SetManipulator)
 
         self.load_octomap = rospy.ServiceProxy('/load_octomap', Empty)
         self.update_octomap = rospy.ServiceProxy('/update_octomap', Empty)
@@ -171,11 +204,18 @@ class SawyerPlanner:
         or_joint_states = rospy.wait_for_message('manipulator_joints', JointState)
         or_joints_pos = numpy.array(or_joint_states.position)
 
+
+        self.initial_joints = rospy.wait_for_message('manipulator_joints', JointState)
+
+        rospy.Subscriber('/update_goal_point', PoseArray, self.update_goal, queue_size = 1)
+        self.goal_updating_mutex = False
+        self.last_goal_update = None
+        self.stop_update_threshold = rospy.get_param('/stop_update_threshold', 0.015)
+
         if self.sim:
             self.stop_arm()
             if HOME_POSE:
                 if RANDOM_START:
-                # if len(last_joints):
                     joint_msg = JointState()
                     joint_msg.position = last_joints
                     self.set_robot_joints(joint_msg)
@@ -183,83 +223,7 @@ class SawyerPlanner:
                     self.set_home_client = rospy.ServiceProxy('set_home_position', Empty)
                     self.set_home_client.call()
                 rospy.sleep(1.0)
-            # self.apple_offset = [0.5, 0.0, 0.0]
-            # self.goal_array = [[0.8, 0.3, 0.5], [0.8, -0.3, 0.5]]
-            # self.goal_array = [[0.8, 0.3, 0.5]]  # bad run low manip
-            # self.goal_array = [[0.8, 0.1, 0.5]]  # semi okay run
-            #self.goal_array = [[0.8, 0.3, 0.2]]  # bad run joint limits
-            #self.goal_array = [[0.7, -0.3, 0.8]]  # good one
-            # self.goal_array = [[0.8, -0.4, 0.8]]0.77170295 -0.1971278   0.14966555
-            # self.goal_array = [[0.914682, -0.218761, 0.694819]]
-            # self.goal_array = [[0.9, 0.2,   0.7]]  # low manip
-            # self.goal_array= [ [ 0.9,         0.12397271,  0.77931632]]  # wobbly
-            #self.goal_array = [[0.735962,-0.204364,0.555817]]  # joint limits
-            # self.goal_array = [[0.8, 0.0, 0.2]] # planner fails
-            # self.goal_array = [[ 0.95,        0.30172234,  0.6943676 ]]  # joint limits
-
-            # random.seed(time.time())
-            # # numpy.random.seed(time.time())
-            # self.goal_array = []
-            # for i in range(8):
-            #     rand_x = random.uniform(0.8, 0.9)
-            #     rand_y = random.uniform(-0.35, 0.35)
-            #     rand_z = random.uniform(0.2, 0.7)
-            #     self.goal_array.append([rand_x, rand_y, rand_z])
-
-            # # add Gaussian noise
-            # x_noise = numpy.random.normal(0.0, 0.02, len(self.goal_array))
-            # y_noise = numpy.random.normal(0.0, 0.05, len(self.goal_array))
-            # z_noise = numpy.random.normal(0.0, 0.05, len(self.goal_array))
-            # self.noise_array = numpy.vstack((x_noise, y_noise, z_noise)).transpose()
-            # rospy.loginfo("self.noise_array: ")
-            # rospy.loginfo(str(self.noise_array))
-
-            if not self.rgb_seg:
-                self.goal_array = copy(goal_array)
-                self.noise_array = copy(noise_array) + self.goal_array
-
-            # self.goal_array = [[0.75, -0.3, 0.62]]
-            # self.goal_array = [[0.45, 0.0, 0.62]]
-            # self.noise_array = [[0.0, 0.0, 0.0]]
-            # if 0:
-            #     cut_point_msg = self.cut_point_srv.call()
-            #     print('cut_point_msg.cut_point: ' + str(cut_point_msg.cut_point))
-            #     cut_point_pose = numpy.identity(4)
-            #     cut_point_pose[:3,3] = numpy.transpose([cut_point_msg.cut_point.x, cut_point_msg.cut_point.y, cut_point_msg.cut_point.z])
-            #     cut_point_pose = numpy.dot(self.ee_pose, cut_point_pose)
-            #     self.goal_array = [cut_point_pose[:3,3]]
-            else:
-            # if 0:
-                self.rgb_segment_goal_and_noise()
-                print('noise_array: ' + str(self.noise_array))
-            # self.noise_array = [[ 0.0, 0.0, 0.0]]  # joint limits
-            # self.goal_array = [[ 0.91032737, -0.07162992 , 0.18117678]]  # joint limits
-
-            # self.goal_array = []
-            # x_array = [0.9]
-            # y_array = [-0.35, 0.0, 0.35]
-            # z_array = [0.2, 0.45, 0.7]
-            # for x in x_array:
-            #     for y in y_array:
-            #         for z in z_array:
-            #             self.goal_array.append([x, y, z])
-
-
-            #self.goal_array = []
-            #for index in range (-6, 7):
-            #    self.goal_array.append([0.8, index/20.0, 0.4])
-
-
-        # if not self.sim:
         else:
-            # TODO: This section is copy and pasted from SIM section, unify
-            if not self.rgb_seg:
-                self.goal_array = copy(goal_array)
-                self.noise_array = copy(noise_array) + self.goal_array
-            else:
-                self.rgb_segment_goal_and_noise()
-                print('noise_array: ' + str(self.noise_array))
-            print('noise_array: ' + str(self.noise_array))
             if rospy.get_param('/robot_name') == "sawyer":
                 # from intera_core_msgs.msg import EndpointState, JointLimits
                 import intera_interface
@@ -271,7 +235,7 @@ class SawyerPlanner:
                 current_joints_pos = numpy.array(current_joints_pos.values()[::-1])
                 # joint_states = rospy.wait_for_message("/robot/joint_states", JointState)
                 # joints_pos = numpy.array(joint_states.position)
-            elif rospy.get_param('/robot_name') == "ur5" or rospy.get_param('/robot_name') == "ur10":
+            elif rospy.get_param('/robot_name').startswith("ur5") or rospy.get_param('/robot_name') == "ur10":
                 import socket
                 HOST = rospy.get_param('/robot_ip')   # The remote host
                 PORT = rospy.get_param('/robot_socket', 30002)              # The same port as used by the server
@@ -314,6 +278,10 @@ class SawyerPlanner:
 
         self.state = self.STATE.SEARCH
 
+    def go_to_start(self):
+
+        self.plan_joints_client(self.initial_joints, False, True)
+
     def environment_setup(self):
 
         self.env = openravepy.Environment()
@@ -338,6 +306,10 @@ class SawyerPlanner:
                 name = module.SendCommand(
                     'loadURI ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/ur5_cutter.urdf'
                     + ' ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/ur5_cutter.srdf')
+            elif self.robot_name == "ur5_cutter_test":
+                name = module.SendCommand(
+                    'loadURI ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/ur5_cutter_test.urdf'
+                    + ' ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/ur5_cutter_test.srdf')
             else:
                 rospy.logerr("invalid robot name, exiting...")
                 sys.exit()              
@@ -353,7 +325,7 @@ class SawyerPlanner:
         manip = self.robot.GetActiveManipulator()
         self.robot.SetActiveDOFs(manip.GetArmIndices())
         if 1:
-        # if self.robot_name == "ur10" or self.robot_name == "ur5":
+        # if self.robot_name == "ur10" or self.robot_name.startswith("ur5"):
             self.joint_limits_lower = self.robot.GetActiveDOFLimits()[0] + self.limits_epsilon
             self.joint_limits_upper = self.robot.GetActiveDOFLimits()[1] - self.limits_epsilon
             print "limits_lower:"
@@ -364,24 +336,40 @@ class SawyerPlanner:
     # def socket_handshake(self, *args):
     #     self.socket_handler.send("\n")
 
-    def rgb_segment_goal_and_noise(self):
+    def rgb_segment_goal(self, pose_array = None, ee_pose = None):
 
-        self.goal_array = []
+        cut_points = []
 
         rospy.set_param('segment_color', self.target_color)
-        cut_points_msg = self.cut_point_srv.call()
+        if pose_array is None:
 
-        print('{} points of interest found!'.format(len(cut_points_msg.cut_points.poses)))
-        camera_pose = numpy.dot(self.ee_pose, self.camera_offset_matrix)
+            cut_points_msg = self.cut_point_srv.call()
+            print('{} points of interest found!'.format(len(cut_points_msg.cut_points.poses)))
+            pose_array = cut_points_msg.cut_points
 
-        for cut_pose in cut_points_msg.cut_points.poses:
+        if ee_pose is None:
+            ee_pose = self.ee_pose
+
+        camera_pose = numpy.dot(ee_pose, self.camera_offset_matrix)
+
+        for cut_pose in pose_array.poses:
             cut_point = cut_pose.position
             cut_point_pose = numpy.identity(4)
             cut_point_pose[:3, 3] = numpy.transpose([cut_point.x, cut_point.y, cut_point.z])
             cut_point_pose_world = numpy.dot(camera_pose, cut_point_pose)
-            self.goal_array.append(cut_point_pose_world[:3, 3])
+            cut_points.append(cut_point_pose_world[:3, 3])
 
+        return cut_points, camera_pose
+
+    def rgb_segment_set_goal(self):
+
+        cut_points, camera_pose = self.rgb_segment_goal()
+        self.goal_array = cut_points
         self.goal_point_camera_pose = camera_pose
+
+        if self.noise_color:
+            rospy.logwarn('Warning: Noise color based segmentation is temporarily disabled.')
+        self.noise_array = copy(self.goal_array)
 
         # if self.noise_color and len(self.goal_array) == 1:
         #
@@ -397,13 +385,50 @@ class SawyerPlanner:
         #     noise_cut_point_pose = numpy.dot(self.ee_pose, noise_cut_point_pose)
         #     self.noise_array = numpy.asarray(noise_cut_point_pose[:3, 3]).reshape(1, 3)
 
-        if self.noise_color:
-            rospy.logwarn('Warning: Noise color based segmentation is temporarily disabled.')
+    def update_goal(self, msg):
+
+        if self.goal_updating_mutex:
+            print('Mutex not released')
+            return
+
+        # TODO: Technically, these positions are not synchronized with the point cloud used to generate the estimates
+        # The right solution would be to have cut_point_srv return the pose as well
+
+        ee_position = self.ee_position
+        ee_pose = self.ee_pose
+        goal = self.goal
+
+        if numpy.sqrt(((ee_position - goal) ** 2).sum()) < self.stop_update_threshold:
+            rospy.loginfo_throttle(5, 'Endpoint close to goal, stopping updating...')
+            return
+
+        self.goal_updating_mutex = True
+
+        max_update_velocity = rospy.get_param('/goal_update_velocity', 0.01)        # Dictates how fast the goal can change
+        reject_update_threshold = rospy.get_param('/goal_reject_threshold', 0.04)   # If the goal moves more than this amount, reject its update
+
+        goal_positions, _ = self.rgb_segment_goal(msg, ee_pose)
+
+        distances_from_current = np.array([np.sqrt(((new_goal - goal)**2).sum()) for new_goal in goal_positions])
+        new_goal_index = int(np.argmin(distances_from_current))
+        dist = distances_from_current[new_goal_index]
+        new_goal = goal_positions[new_goal_index]
+
+        if dist > reject_update_threshold:
+            rospy.loginfo_throttle(0.5, 'Detected an unlikely jump of {:.4f}, disregarding it'.format(dist))
+
+        current_time = rospy.Time.now()
+        maximum_allowed_dist = (current_time - self.last_goal_update).to_sec() * max_update_velocity
+
+        if maximum_allowed_dist < dist:
+            self.goal = goal + (new_goal - goal) * (maximum_allowed_dist / dist)
         else:
-            print('Not using any noise-based color segmentation')
+            self.goal = new_goal
 
-        self.noise_array = self.goal_array[:]  # Shallow copy, shouldn't be modifying arrays inside?
+        rospy.loginfo_throttle(0.1, 'Goal updated to {:.3f}, {:.3f}, {:.3f}'.format(new_goal[0], new_goal[1], new_goal[2]))
 
+        self.last_goal_update = current_time
+        self.goal_updating_mutex = False
 
     def computeManipulability(self):
 
@@ -478,7 +503,7 @@ class SawyerPlanner:
         if self.state == self.STATE.SEARCH:
 
             rospy.loginfo("SEARCH")
-        
+
             # call the hydra_bridge server
             #pipeline_srv = Trigger()
             #resp = self.start_pipeline_client.call(pipeline_srv)
@@ -487,6 +512,8 @@ class SawyerPlanner:
 
             # wait???
 
+            if self.rgb_seg:
+                self.rgb_segment_set_goal()
             self.refresh_octomap()
             self.state = self.STATE.TO_NEXT
         
@@ -501,11 +528,11 @@ class SawyerPlanner:
             self.sequence_goals()
             elapsed_time = rospy.get_time() - time_start
 
-            rospy.sleep(1.0)  # avoid exiting before subscriber updates new apple goal, 666 should replace with something more elegant
+            rospy.sleep(1.0)  # TODO: avoid exiting before subscriber updates new apple goal, 666 should replace with something more elegant
             if self.goal[0] == None:
                 self.save_logs()
                 rospy.logerr("There are no apples to pick!")
-                # sys.exit()
+
                 return False
 
             self.results_dict['Sequencing Time'].append(elapsed_time)
@@ -582,7 +609,13 @@ class SawyerPlanner:
             time_start = rospy.get_time()
             # status = self.go_to_goal([None], numpy.array([1.0, 0.0, 0.0]), self.go_to_goal_offset)
             rospy.sleep(2.0)
-            status = self.go_to_goal([None], numpy.array([None]), self.go_to_goal_offset)
+            rospy.set_param('/going_to_goal', True)
+            try:
+                status = self.go_to_goal([None], numpy.array([None]), self.go_to_goal_offset)
+            finally:
+                self.stop_arm()
+                rospy.set_param('/going_to_goal', False)
+
             elapsed_time = rospy.get_time() - time_start
             if status == 0:
                 self.state = self.STATE.GRAB
@@ -615,10 +648,15 @@ class SawyerPlanner:
         elif self.state == self.STATE.GRAB:
 
             rospy.loginfo("GRAB")
-
-            if 0:
-            # if not self.sim:
-                self.grab()
+            try:
+                self.set_manipulator_srv(String('cutpoint'))
+                # import pdb
+                # pdb.set_trace()
+                rospy.sleep(rospy.Duration.from_sec(2.))  # Hack to make sure the ee position updates
+                self.go_to_goal(rotate=False)
+            finally:
+                self.stop_arm()
+                self.set_manipulator_srv(String('arm'))
 
             #self.enable_bridge_pub.publish(Bool(False))
 
@@ -682,6 +720,7 @@ class SawyerPlanner:
             rospy.loginfo("TO_DROP")
 
             rospy.sleep(0.1)
+
             if numpy.linalg.norm(numpy.asarray(self.recovery_trajectory[-1]) - numpy.asarray(self.recovery_trajectory[0])) > 0.01:
                 self.recovery_trajectory.append(self.manipulator_joints)
 
@@ -689,6 +728,7 @@ class SawyerPlanner:
                 print("self.recovery_trajectory[0]: " + str(self.recovery_trajectory[0]))
                 traj_msg = self.list_trajectory_msg(self.recovery_trajectory[::-1])
                 resp = self.optimise_trajectory_client.call(traj_msg, LOGGING)
+                self.stop_arm()
                 if not resp.success:
                 # print ("start2: ", self.starting_position, " ", self.starting_direction)
 
@@ -703,27 +743,8 @@ class SawyerPlanner:
                 # sys.exit()
                 return False
 
-            # print ("start2: ", self.starting_position, " ", self.starting_direction)
-
-            # if not self.go_to_goal(self.starting_position, self.starting_direction, 0.0):
-            #     rospy.logerr("could not move back to drop, don't know how to recover, exiting...")
-            #     sys.exit()
-
             self.goal = [None]
-
-            # self.K_VQ = 0.5
-            # goal = deepcopy(self.goal)
-            # goal[0] -= 0.35
-            # # to_goal = numpy.dot( self.ee_orientation.rotation_matrix, numpy.array([0.0, 0.0, 1.0]) )
-            # print("starting position and direction: ")
-            # print(self.starting_position, self.starting_direction)
-            # self.go_to_goal(self.starting_position, self.starting_direction, 0.0)
-            # self.go_to_goal(goal)
-
-            # self.go_to_place()
-
             self.state = self.STATE.DROP
-            # self.state = self.STATE.TO_NEXT
 
         elif self.state == self.STATE.DROP:
 
@@ -889,26 +910,6 @@ class SawyerPlanner:
 
         self.starting_position = self.goal - numpy.array([self.starting_position_offset, 0.0, 0.0]);
         self.starting_direction = numpy.array([1.0, 0.0, 0.0])
-        
-
-    # def go_to_start(self):
-        
-    #     joints = self.arm.joint_angles()
-
-    #     if ( numpy.linalg.norm(joints.values() - self.qstart ) < 4.0 ):
-    #         cmd = dict(zip(joints.keys(), self.qstart))
-    #         self.arm.move_to_joint_positions(cmd)
-    #     else:
-    #         # if too far, go up first
-    #         rospy.logwarn("The starting position is too far, I'm going up first!")
-            
-    #         cmd = dict(zip(joints.keys(), self.CONFIG_UP))
-    #         self.arm.move_to_joint_positions(cmd)
-            
-    #         time.sleep(1)
-            
-    #         cmd = dict(zip(joints.keys(), self.qstart))
-    #         self.arm.move_to_joint_positions(cmd)
                            
     def stop_arm(self):
         # joint_vel = numpy.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -922,7 +923,7 @@ class SawyerPlanner:
                 cmd = self.arm.joint_velocities()
                 cmd = dict(zip(cmd.keys(), joint_vel[::-1]))
                 self.arm.set_joint_velocities(cmd)
-            elif rospy.get_param('/robot_name') == "ur5" or rospy.get_param('/robot_name') == "ur10":
+            elif rospy.get_param('/robot_name').startswith("ur5") or rospy.get_param('/robot_name') == "ur10":
                 self.s.send("stopj(2)" + "\n")
 
     def is_in_joint_limits(self):
@@ -984,7 +985,7 @@ class SawyerPlanner:
         return lin_point_
 
         
-    def go_to_goal(self, goal = [None], to_goal = [None], offset = 0.05):
+    def go_to_goal(self, goal = [None], to_goal = [None], offset = 0.0, rotate=True):
 
         lin_step = 0.0
         # ee_start_position = self.ee_position
@@ -1005,61 +1006,30 @@ class SawyerPlanner:
             else:
                 goal_off = goal - offset * self.normalize(to_goal)
 
-        start_distance = numpy.linalg.norm(goal_off - self.ee_position)
-        start_position = copy(self.ee_position)
-        # while numpy.linalg.norm(goal_off - self.ee_position) > 0.01 and not rospy.is_shutdown():
-        while numpy.linalg.norm(goal - self.ee_position) > 0.005 and not rospy.is_shutdown():
-            # rospy.loginfo_throttle(0.5, "goal_off: " + str(goal_off))
-            # print("ee_position: " + str(self.ee_position))
-            #print("ee_orientation: " + str(self.ee_orientation))
-            if (self_goal):  # means servo'ing to a dynamic target
-                goal_draw = 1.0 * (self.goal - start_position) + start_position
-                noise_draw = 1.0 * (self.noise - start_position) + start_position
-                goal = 1.0 * (self.goal - start_position) + start_position
-                noise = 1.0 * (self.noise - start_position) + start_position
-                if 1:
-                # if self.sim:
-                    if CONTINUOUS_NOISE:
-                        # x_noise = numpy.random.normal(0.0, 0.01)
-                        # y_noise = numpy.random.normal(0.0, 0.02)
-                        # z_noise = numpy.random.normal(0.0, 0.02)
-                        # lin_step = min(1 - numpy.linalg.norm(self.ee_position - goal) / start_distance, 1.0) 
-                        # noise_vec = self.lin_point(goal, goal + self.noise, lin_step)
-                        # noise_vec = min(lin_step, 1.0) * ((goal + self.noise) - goal) + goal
-                        noise_vec_draw = min(lin_step, 1.0) * (noise_draw - goal_draw) + goal_draw
-                        noise_vec = min(lin_step, 1.0) * (noise - goal) + goal
-                        lin_step += 0.0015
-                        # noise_vec = self.lin_point(goal, self.noise, )
-                        # goal += numpy.asarray(noise_vec)
-                        # print("noise_vec: " + str(noise_vec))
-                        # print("self.noise " + str(self.noise))
-                        # print("lin_step: " + str(lin_step))
-                        # print("goal: " + str(goal))
-                        # print("goal + self.noise: " + str(goal + self.noise))
-                        goal_draw = copy(noise_vec_draw)
-                        goal = copy(noise_vec)
-                        # draw_point_msg = Point(goal[0], goal[1], goal[2])
-                        # self.draw_point_srv(draw_point_msg)
-                    # rospy.sleep(0.1)
-                goal_off = deepcopy(self.goal_off)
+
+        self.last_goal_update = rospy.Time.now()
+
+        while numpy.linalg.norm(goal - self.ee_position) > 0.001 and not rospy.is_shutdown():
+
+            if self_goal:  # means servo'ing to a dynamic target
+
+                goal = deepcopy(self.goal)      # self.goal is volatile when using visual servoing
+
                 if self.sim:
                     # update goal_off because ee_position changes
                     if not CONTINUOUS_NOISE:
                         goal += self.noise
-                    goal_off = goal - offset * self.normalize(goal - self.ee_position)
-                    # rospy.loginfo_throttle(0.5, "adding noise" + str(self.noise))
-                    # rospy.loginfo_throttle(0.5, "self.noise_array" + str(self.noise_array))
+
                 self.recovery_trajectory.append(copy(self.manipulator_joints))
 
-            draw_point_msg = Point(goal_draw[0], goal_draw[1], goal_draw[2])
+            draw_point_msg = Point(goal[0], goal[1], goal[2])
             self.draw_point_srv(draw_point_msg)
-            rospy.loginfo_throttle(0.5, "ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
-            # rospy.loginfo("ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
-            # rospy.loginfo_throttle(0.5, "[distance calc] ee_position: " + str(self.ee_position))
-            # rospy.loginfo_throttle(0.5, "[distance calc] goal: " + str(goal))
 
-            if numpy.linalg.norm(self.ee_position - self.goal) < 0.3:  # 0.2m min range on sr300 and +0.1 to account for camera frame offset from EE
+            rospy.loginfo_throttle(0.5, "ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
+
+            if numpy.linalg.norm(self.ee_position - self.goal) < self.stop_update_threshold:
                 rospy.loginfo_throttle(1.0, "disabling updating of apple position because too close")
+                rotate = False
                 if not self.sim:
                     self.enable_bridge_pub.publish(Bool(False))
             else:
@@ -1077,7 +1047,9 @@ class SawyerPlanner:
 
             des_vel_t = self.K_V * (goal - self.ee_position)
 
-            if to_goal[0] != None:
+            if not rotate:
+                des_omega = np.zeros(3)
+            elif to_goal[0] != None:
                 des_omega = - self.K_VQ * self.get_angular_velocity([None], to_goal)
             else:
                 des_omega = - self.K_VQ * self.get_angular_velocity(goal)
@@ -1106,7 +1078,7 @@ class SawyerPlanner:
                         cmd = self.arm.joint_velocities()
                         cmd = dict(zip(cmd.keys(), joint_vel[::-1]))
                         self.arm.set_joint_velocities(cmd)
-                    elif rospy.get_param('/robot_name') == "ur5" or rospy.get_param('/robot_name') == "ur10":
+                    elif rospy.get_param('/robot_name').startswith("ur5") or rospy.get_param('/robot_name') == "ur10":
                         cmd = str("speedj([%.5f,%.5f,%.5f,%.5f,%.5f,%.5f],5.0,0.05)" % tuple(joint_vel)) + "\n"
                         # print ("CMD: " + cmd)
                         self.s.send(cmd)
@@ -1121,7 +1093,7 @@ class SawyerPlanner:
 
     def plan_to_goal(self, goal = [None], to_goal = [None], offset = 0.13, ignore_trellis=False):
 
-        iters = 16
+        iters = 64
         rad_step = 2 * numpy.pi / float(iters)
         if self.rgb_seg:
             iter_arr = range(iters)[::-1]
@@ -1187,6 +1159,8 @@ class SawyerPlanner:
             goal_off_pose = goal_poses[index]
 
             pos = self.pose_to_ros_msg(goal_off_pose)
+
+            # TODO: Check IK/Manipulability check
 
             resp = self.check_ray_srv(pos)
             # print(resp.collision)

@@ -4,9 +4,11 @@
     <arg name="ip" default="127.0.0.1" />
     <arg name="robot" default="ur5" />
     <arg name="use_camera" default="false" />
+    <arg name="use_servoing" default="false" />
 
     <param name="use_camera" value="$(arg use_camera)" />
     <param name="robot_ip" value="$(arg ip)" />
+    <param name="use_servoing" value="$(arg use_servoing)" />
 
     <group unless="$(arg sim)">
         <include file="$(find ur_modern_driver)/launch/ur5e_bringup.launch">
@@ -26,6 +28,7 @@
         <include file="$(find realsense2_camera)/launch/rs_rgbd.launch" />
         <include file="$(find rgb_segmentation)/launch/rgb_segmentation.launch" />
         <include file="$(find sawyer_planner)/launch/pcl_filter_nodelet.launch" />
+        <node name="goal_updater" pkg="sawyer_planner" type="goal_manager_visual.py" unless="$(arg sim)" />
     </group>
 
 
