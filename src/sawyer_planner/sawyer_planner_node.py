@@ -65,7 +65,6 @@ class SawyerPlanner:
         self.num_goals_history = 0  # length of sequenced goals
         self.ee_position = None
         self.ee_pose = []
-        self.starting_position_offset = 0.5
         self.apple_offset = [0.0, 0.0, 0.0]
         # self.go_to_goal_offset = [0.05, 0.0, 0.0]
         self.go_to_goal_offset = 0.12  # offset from apple centre to sawyer end effector frame (not gripper)
@@ -344,7 +343,8 @@ class SawyerPlanner:
         if pose_array is None:
 
             cut_points_msg = self.cut_point_srv.call()
-            print('{} points of interest found!'.format(len(cut_points_msg.cut_points.poses)))
+
+            rospy.loginfo('{} points of interest found!'.format(len(cut_points_msg.cut_points.poses)))
             pose_array = cut_points_msg.cut_points
 
         if ee_pose is None:
@@ -430,15 +430,27 @@ class SawyerPlanner:
         self.last_goal_update = current_time
         self.goal_updating_mutex = False
 
-    def computeManipulability(self):
 
-        # current_joints_pos = self.arm.joint_angles()
-        # current_joints_pos = current_joints_pos.values()
-        current_joints_pos = copy(self.manipulator_joints)
+    def get_pose_ik(self, pose, joints=None):
+
+        if joints is None:
+            joints = self.manipulator_joints
+        configs = self.ikmodel.manip.FindIKSolutions(pose, openravepy.IkFilterOptions.CheckEnvCollisions)
+        if not configs.size:
+            return None
+        min_index = np.argmin(np.abs(configs - joints).sum(axis=1))
+
+        return configs[min_index,:]
+
+
+    def computeReciprocalConditionNumber(self, pose=None):
+
+        if pose is None:
+            pose = copy(self.manipulator_joints)
 
         with self.robot:
             # self.robot.SetDOFValues(current_joints_pos[::-1], self.robot.GetActiveManipulator().GetArmIndices())
-            self.robot.SetDOFValues(current_joints_pos, self.robot.GetActiveManipulator().GetArmIndices())
+            self.robot.SetDOFValues(pose, self.robot.GetActiveManipulator().GetArmIndices())
             J_t = self.robot.GetActiveManipulator().CalculateJacobian()
             J_r = self.robot.GetActiveManipulator().CalculateAngularVelocityJacobian()
             J = numpy.concatenate((J_t, J_r), axis = 0)
@@ -447,25 +459,7 @@ class SawyerPlanner:
 
         assert numpy.allclose(J, numpy.dot(u, numpy.dot(numpy.diag(s), v) ))
 
-        return numpy.prod(s)
-
-    def computeReciprocalConditionNumber(self):
-
-        # current_joints_pos = self.arm.joint_angles()
-        # current_joints_pos = current_joints_pos.values()
-        current_joints_pos = copy(self.manipulator_joints)
-
-        with self.robot:
-            # self.robot.SetDOFValues(current_joints_pos[::-1], self.robot.GetActiveManipulator().GetArmIndices())
-            self.robot.SetDOFValues(current_joints_pos, self.robot.GetActiveManipulator().GetArmIndices())
-            J_t = self.robot.GetActiveManipulator().CalculateJacobian()
-            J_r = self.robot.GetActiveManipulator().CalculateAngularVelocityJacobian()
-            J = numpy.concatenate((J_t, J_r), axis = 0)
-
-        u, s, v = numpy.linalg.svd(J, full_matrices = False) # here you can try to use just J_t instead of J
-
-        assert numpy.allclose(J, numpy.dot(u, numpy.dot(numpy.diag(s), v) ))
-
+        # return numpy.prod(s)  # Old manipulability measure
         return numpy.min(s)/numpy.max(s)
 
     def remove_current_apple(self):
@@ -543,16 +537,12 @@ class SawyerPlanner:
             # if self.sim:
             #     resp = self.optimise_trajectory_client(self.sequenced_trajectories[0])
             #     sys.exit()
-                
-            print("starting position and direction: ")
-            print(self.starting_position, self.starting_direction)
-            # time_start = rospy.get_time()
 
             # if self.sim:
             draw_point_msg = Point(self.goal[0], self.goal[1], self.goal[2])
             self.draw_point_srv(draw_point_msg)
 
-            plan_success, plan_duration, traj_duration = self.plan_to_goal(self.starting_position, self.starting_direction, 0.0)
+            plan_success, plan_duration, traj_duration = self.plan_to_goal()
             # elapsed_time = rospy.get_time() - time_start
             # print("self.goal: " + str(self.goal))
             # raw_input('press enter to continue...')
@@ -650,8 +640,6 @@ class SawyerPlanner:
             rospy.loginfo("GRAB")
             try:
                 self.set_manipulator_srv(String('cutpoint'))
-                # import pdb
-                # pdb.set_trace()
                 rospy.sleep(rospy.Duration.from_sec(2.))  # Hack to make sure the ee position updates
                 self.go_to_goal(rotate=False)
             finally:
@@ -698,12 +686,7 @@ class SawyerPlanner:
                 traj_msg = self.list_trajectory_msg(self.recovery_trajectory[::-1])
                 resp = self.optimise_trajectory_client.call(traj_msg, LOGGING)
                 if not resp.success:
-                # print ("start2: ", self.starting_position, " ", self.starting_direction)
-
-                # if not self.go_to_goal(self.starting_position, self.starting_direction, 0.0):
-                    # self.save_logs()
                     rospy.logerr("could not move back to drop, don't know how to recover, exiting...")
-                    # sys.exit()
                     return False
             else:
                 rospy.logwarn("arm didn't appear to move much before recovery state, continuing without recovery procedure")
@@ -730,12 +713,7 @@ class SawyerPlanner:
                 resp = self.optimise_trajectory_client.call(traj_msg, LOGGING)
                 self.stop_arm()
                 if not resp.success:
-                # print ("start2: ", self.starting_position, " ", self.starting_direction)
-
-                # if not self.go_to_goal(self.starting_position, self.starting_direction, 0.0):
-                    # self.save_logs()
                     rospy.logerr("could not move back to drop, don't know how to recover, exiting...")
-                    # sys.exit()
                     return False
             else:
                 # self.save_logs()
@@ -790,6 +768,9 @@ class SawyerPlanner:
         # raw_input('press_enter')
 
     def sequence_goals(self):
+
+        # TODO: Fix this
+
         if not len(self.goal_array):
             self.goal = [None]
             return
@@ -797,10 +778,7 @@ class SawyerPlanner:
             goals = numpy.array(deepcopy(self.goal_array))
             tasks_msg = PoseArray()
             for goal in goals:
-                # T = openravepy.transformLookat(goal + [0.1, 0.0, 0.0], goal - [self.starting_position_offset, 0.0, 0.0], [0, 0, -1])
                 T = openravepy.transformLookat(goal, goal - [0.25, 0.0, 0.0], [0, 0, -1])
-                # T = openravepy.transformLookat(goal + [0.1, 0.0, 0.0], goal, [0, 0, -1])
-                # T = numpy.dot(T, numpy.linalg.inv(self.T_G2EE))
                 pose = openravepy.poseFromMatrix(T)
                 pose_msg = Pose()
                 pose_msg.orientation.w = pose[0]
@@ -828,16 +806,7 @@ class SawyerPlanner:
             self.goal_off = self.goal
             self.noise = numpy.asarray(self.sequenced_noise[self.current_apples_ind])
 
-            self.starting_position = self.goal - numpy.array([0.25, 0.0, 0.0]);
-            # self.starting_position = self.goal - numpy.array([0.0, 0.1, 0.0]);
             self.starting_direction = numpy.array([1.0, 0.0, 0.0])
-        # else:
-        #     self.goal = numpy.array(self.sequenced_goals[self.current_apples_ind])
-        #     self.goal_off = self.goal - self.go_to_goal_offset * self.normalize(self.goal - self.ee_position)
-        #     self.noise = numpy.asarray(self.sequenced_noise[self.current_apples_ind])
-
-        #     self.starting_position = self.goal - numpy.array([self.starting_position_offset, 0.0, 0.0]);
-        #     self.starting_direction = numpy.array([1.0, 0.0, 0.0])
 
 
     def get_robot_ee_position(self, msg):
@@ -899,8 +868,6 @@ class SawyerPlanner:
                     self.goal = numpy.array(self.goal_array[min_index])
                     self.goal_off = self.goal - self.go_to_goal_offset * self.normalize(self.goal - self.ee_position)
 
-                    self.starting_position = self.goal - numpy.array([self.starting_position_offset, 0.0, 0.0]);
-                    self.starting_direction = numpy.array([1.0, 0.0, 0.0])
                 rospy.loginfo_throttle(1, "goal: " + str(self.goal))
 
     def get_goal(self, msg, offset = 0.08):
@@ -908,8 +875,6 @@ class SawyerPlanner:
         self.goal = numpy.array([msg.x, msg.y, msg.z])
         self.goal_off = self.goal - offset * self.normalize(self.goal - self.ee_position)
 
-        self.starting_position = self.goal - numpy.array([self.starting_position_offset, 0.0, 0.0]);
-        self.starting_direction = numpy.array([1.0, 0.0, 0.0])
                            
     def stop_arm(self):
         # joint_vel = numpy.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -954,7 +919,6 @@ class SawyerPlanner:
             #     return True
 
     def is_greater_min_manipulability(self):
-        #manipulability = self.computeManipulability()
         manipulability = self.computeReciprocalConditionNumber()
         if not self.recovery_flag:
             if (manipulability < self.MIN_MANIPULABILITY):
@@ -1091,91 +1055,59 @@ class SawyerPlanner:
         return 0
 
 
-    def plan_to_goal(self, goal = [None], to_goal = [None], offset = 0.13, ignore_trellis=False):
+    def get_goal_approach_pose(self, goal, offset, angle):
 
-        iters = 64
-        rad_step = 2 * numpy.pi / float(iters)
-        if self.rgb_seg:
-            iter_arr = range(iters)[::-1]
-        else:
-            iter_arr = range(1)
+        x = offset * math.cos(angle)
+        y = offset * math.sin(angle)
+        q = pyquaternion.Quaternion(0.5, -0.5, 0.5, -0.5)
 
-        goal_locations = []
-        goal_poses = []
+        goal_off_pose = openravepy.transformLookat(goal, goal + [x, y, 0.0], [0, 0, -1])
+        goal_off_pose = openravepy.poseFromMatrix(goal_off_pose)
 
-        # This for loop "circles" around the
+        # compute camera transform
+        T_EE = numpy.zeros((4, 4))
+        T_EE[:3, :3] = q.rotation_matrix
+        T_EE[:3, 3] = goal_off_pose[4:].transpose()
+        T_EE[3, 3] = 1.0
 
-        for it in iter_arr:
-            # rad = rad_step * it + (numpy.pi / 2)
-            rad = rad_step * it + numpy.pi
-            # rad = rad_step * it
-            x = 0.25 * math.cos(rad)
-            y = 0.25 * math.sin(rad)
+        tool_position = T_EE[:3, 3]
+        tool_pose = goal_off_pose
 
-            if goal[0] == None:
-                goal = copy(self.goal)
-                goal_off = copy(self.goal_off)
-            else:
-                if to_goal[0] == None:
-                    goal_off = goal - offset * self.normalize(goal - self.ee_position)
-                else:
-                    goal_off = goal - offset * self.normalize(to_goal)
+        return tool_position, tool_pose
 
-            #orientation_q = pyquaternion.Quaternion(axis = to_goal, angle = 0)
-            #orientation = [orientation_q[0], orientation_q[1], orientation_q[2], orientation_q[3]]
+    def evaluate_goal_approach_manipulability(self, angle, offset):
 
-            q = pyquaternion.Quaternion(0.5, -0.5, 0.5, -0.5)
+        _, pose = self.get_goal_approach_pose(self.goal, offset, angle)
+        joints = self.get_pose_ik(pose)
+        if joints is None:
+            return -1
+        manip = self.computeReciprocalConditionNumber(joints)
+        return manip
 
-            # goal_off_pose = openravepy.transformLookat(goal + self.starting_direction, goal, [0, 0, -1])
-            goal_off_pose = openravepy.transformLookat(self.goal, self.goal + [x, y, 0.0], [0, 0, -1])
-            goal_off_pose = openravepy.poseFromMatrix(goal_off_pose)
 
-            # compute camera transform
-            T_EE = numpy.zeros((4, 4))
-            T_EE[:3, :3] = q.rotation_matrix
-            T_EE[:3, 3] = goal_off_pose[4:].transpose()
-            # T_EE[:3, 3] = goal.transpose()
-            T_EE[3, 3] = 1.0
+    def plan_to_goal(self, offset = 0.25, ignore_trellis=False):
 
-            # T_C = numpy.dot(T_EE, numpy.linalg.inv(self.T_G2EE))
-            # T_C = numpy.dot(T_EE, numpy.linalg.inv(self.T_EE2C))
+        # Current just linear sampling
+        angles = np.linspace(0, 2*np.pi, 32, endpoint=False)
+        manips = [self.evaluate_goal_approach_manipulability(angle, offset) for angle in angles]
+        ordering = np.argsort(manips)[::-1]
+        for index in ordering:
+            if manips[index] < self.MIN_MANIPULABILITY_RECOVER:
+                break       # Indexes ordered by manipulability, no need to check further
 
-            # goal_off_camera = T_C[:3, 3]
-            goal_off_camera = T_EE[:3, 3]
-
-            goal_locations.append(goal_off_camera)
-            goal_poses.append(goal_off_pose)
-
-        # Prioritize approaches which are in line with the vector from the base to the goal
-        sorting_func = lambda i: (-numpy.dot(goal - goal_locations[i], goal) / (numpy.linalg.norm(goal - goal_locations[i]) * numpy.linalg.norm(goal)))
-        indexer = range(len(goal_locations))
-        indexer.sort(key=sorting_func)
-
-        self.refresh_octomap(self.goal)  # Filters out the points around the goal to avoid erroneous collisions
-
-        for index in indexer:
-
-            goal_off_camera = goal_locations[index]
-            goal_off_pose = goal_poses[index]
-
-            pos = self.pose_to_ros_msg(goal_off_pose)
-
-            # TODO: Check IK/Manipulability check
-
-            resp = self.check_ray_srv(pos)
-            # print(resp.collision)
-            # resp.collision = False
+            position, pose = self.get_goal_approach_pose(self.goal, offset, angles[index])
+            resp = self.check_ray_srv(self.pose_to_ros_msg(pose))
 
             if not resp.collision:
 
                 plan_pose_msg = Pose()
-                plan_pose_msg.position.x = goal_off_camera[0]
-                plan_pose_msg.position.y = goal_off_camera[1]
-                plan_pose_msg.position.z = goal_off_camera[2]
-                plan_pose_msg.orientation.x = goal_off_pose[1]
-                plan_pose_msg.orientation.y = goal_off_pose[2]
-                plan_pose_msg.orientation.z = goal_off_pose[3]
-                plan_pose_msg.orientation.w = goal_off_pose[0]
+                plan_pose_msg.position.x = position[0]
+                plan_pose_msg.position.y = position[1]
+                plan_pose_msg.position.z = position[2]
+                plan_pose_msg.orientation.x = pose[1]
+                plan_pose_msg.orientation.y = pose[2]
+                plan_pose_msg.orientation.z = pose[3]
+                plan_pose_msg.orientation.w = pose[0]
 
                 if self.sequencing_metric == 'fredsmp' or self.sequencing_metric == 'hybrid':
                     # resp = self.optimise_offset_client(self.sequenced_trajectories[self.current_apples_ind], self.sim)
@@ -1187,38 +1119,7 @@ class SawyerPlanner:
                 if not resp.success:
                     rospy.logwarn("planning to next target failed")
                 else:
-                    # T = openravepy.transformLookat(self.sequenced_goals[0] + [0.1, 0.0, 0.0], self.sequenced_goals[0] - [self.starting_position_offset, 0.0, 0.0], [0, 0, -1])
-                    # T = numpy.dot(T, numpy.linalg.inv(self.T_G2EE))
-                    goal_off = self.sequenced_goals[self.current_apples_ind] - [self.starting_position_offset, 0.0, 0.0]
-                    # goal_off = T[:3, 3]
-                # message = "moveArm," + ",".join(map(str, goal_off_camera)) + "," + ",".join(map(str, [-0.5, 0.5, -0.5, 0.5])) + "\n"
-                
-                # resp = ""
-                # while resp == "":
-            
-                #     self.socket_handler.send(message)
-                #     print("sent moveArm")
-                #     resp = self.socket_handler.recv(self.BUFFER_SIZE) # string -> 0 = success 1 = fail
-
-                # message = "sendArm\n"
-
-                # stopped = ""
-                # while stopped == "":
-                #     self.socket_handler.send(message)
-                #     print("Sent SendArm")
-                #     stopped = self.socket_handler.recv(self.BUFFER_SIZE)   
-
-                # print("Starting moving")
-
-                    # while numpy.linalg.norm(goal_off - self.ee_position) > 0.01 and not rospy.is_shutdown():
-                    #     print("waiting for arm to reach goal_off pose")
-                    #     print("goal_off_camera: " + str(goal_off_camera))
-                    #     print("goal_off: " + str(goal_off))
-                    #     print("self.ee_position: " + str(self.ee_position))
-                    #     rospy.sleep(0.1)
-                    #     pass 
                     rospy.sleep(1.0)
-                if resp.success:
                     return resp.success, resp.plan_duration, resp.traj_duration
         return False, numpy.nan, numpy.nan
 
@@ -1309,22 +1210,6 @@ class SawyerPlanner:
         while not resp.success:
             resp = self.gripper_client.call(False)
 
-        #self.go_up_and_back() 
-
-    def go_up_and_back(self):
-
-        # first go up
-
-        goal = deepcopy(self.goal)
-        goal[2] += 0.10
-
-        to_goal = numpy.dot( self.ee_orientation.rotation_matrix, numpy.array([0.0, 0.0, 1.0]) )
-
-        self.go_to_goal(goal, to_goal)
-
-        # then go back
-        goal[0] -= 0.25
-        self.go_to_goal(goal, to_goal)
 
     def drop(self):
 
@@ -1334,12 +1219,6 @@ class SawyerPlanner:
 
         while not resp.success:
             resp = self.gripper_client.call(True)
-
-    def go_to_place(self):
-
-        to_goal = self.normalize(numpy.array([0.87758256189, 0.0, -0.4794255386]))
-
-        self.plan_to_goal(self.starting_position, to_goal, 0.0)
 
 
     def refresh_octomap(self, point = None, camera_frame=False):

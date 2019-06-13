@@ -19,7 +19,7 @@ num_experiments = 1
 
 def transform_target_start(target, planner):
     q = pyquaternion.Quaternion(0.5, -0.5, 0.5, -0.5)
-    goal_off = target - numpy.array([planner.starting_position_offset, 0.0, 0.0])
+    goal_off = target - numpy.array([0.25, 0.0, 0.0])
     # compute camera transform
     T_EE = numpy.zeros((4, 4))
     T_EE[:3, :3] = q.rotation_matrix
