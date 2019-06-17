@@ -35,6 +35,7 @@ from localisation.srv import *
 from rgb_segmentation.srv import *
 from tf.transformations import quaternion_from_matrix
 # from task_planner.msgs import *
+from sawyer_planner.msg import GoalUpdate
 
 import pyquaternion
 import socket
@@ -206,7 +207,7 @@ class SawyerPlanner:
 
         self.initial_joints = rospy.wait_for_message('manipulator_joints', JointState)
 
-        rospy.Subscriber('/update_goal_point', PoseArray, self.update_goal, queue_size = 1)
+        rospy.Subscriber('/update_goal_point', GoalUpdate, self.update_goal, queue_size = 1)
         self.goal_updating_mutex = False
         self.last_goal_update = None
         self.stop_update_threshold = rospy.get_param('/stop_update_threshold', 0.015)
@@ -391,11 +392,9 @@ class SawyerPlanner:
             print('Mutex not released')
             return
 
-        # TODO: Technically, these positions are not synchronized with the point cloud used to generate the estimates
-        # The right solution would be to have cut_point_srv return the pose as well
+        ee_pose, _, ee_position = self.get_robot_ee_position(msg.pose, return_values=True)
+        points = msg.points
 
-        ee_position = self.ee_position
-        ee_pose = self.ee_pose
         goal = self.goal
 
         if numpy.sqrt(((ee_position - goal) ** 2).sum()) < self.stop_update_threshold:
@@ -407,7 +406,7 @@ class SawyerPlanner:
         max_update_velocity = rospy.get_param('/goal_update_velocity', 0.01)        # Dictates how fast the goal can change
         reject_update_threshold = rospy.get_param('/goal_reject_threshold', 0.04)   # If the goal moves more than this amount, reject its update
 
-        goal_positions, _ = self.rgb_segment_goal(msg, ee_pose)
+        goal_positions, _ = self.rgb_segment_goal(points, ee_pose)
 
         distances_from_current = np.array([np.sqrt(((new_goal - goal)**2).sum()) for new_goal in goal_positions])
         new_goal_index = int(np.argmin(distances_from_current))
@@ -638,13 +637,16 @@ class SawyerPlanner:
         elif self.state == self.STATE.GRAB:
 
             rospy.loginfo("GRAB")
+            default_servoing = rospy.get_param('/use_servoing')
             try:
                 self.set_manipulator_srv(String('cutpoint'))
                 rospy.sleep(rospy.Duration.from_sec(2.))  # Hack to make sure the ee position updates
-                self.go_to_goal(rotate=False)
+
+                self.go_to_goal(rotate=False, visual_update=False)
             finally:
                 self.stop_arm()
                 self.set_manipulator_srv(String('arm'))
+                rospy.set_param('/use_servoing', default_servoing)
 
             #self.enable_bridge_pub.publish(Bool(False))
 
@@ -809,7 +811,7 @@ class SawyerPlanner:
             self.starting_direction = numpy.array([1.0, 0.0, 0.0])
 
 
-    def get_robot_ee_position(self, msg):
+    def get_robot_ee_position(self, msg, return_values=False):
 
         # ee_orientation = pyquaternion.Quaternion(msg.pose.orientation.w, msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z)
         # ee_position = numpy.array([msg.pose.position.x, msg.pose.position.y, msg.pose.position.z])
@@ -822,14 +824,16 @@ class SawyerPlanner:
                 msg.pose.position.y,
                 msg.pose.position.z]
         pose = openravepy.matrixFromPose(pose)
-
-        self.ee_pose = copy(pose)
-        # ee_pose = numpy.dot(pose, self.T_G2EE)
-        # ee_pose = openravepy.poseFromMatrix(ee_pose)
         ee_pose = openravepy.poseFromMatrix(pose)
-        self.ee_orientation = pyquaternion.Quaternion(ee_pose[:4])
-        self.ee_position = numpy.array(ee_pose[4:])
+        orientation = pyquaternion.Quaternion(ee_pose[:4])
+        position = numpy.array(ee_pose[4:])
 
+        if not return_values:
+            self.ee_pose = copy(pose)
+            self.ee_orientation = orientation
+            self.ee_position = position
+        else:
+            return pose, orientation, position
 
     # def get_joint_limits(self, msg):
         
@@ -949,7 +953,10 @@ class SawyerPlanner:
         return lin_point_
 
         
-    def go_to_goal(self, goal = [None], to_goal = [None], offset = 0.0, rotate=True):
+    def go_to_goal(self, goal = [None], to_goal = [None], offset = 0.0, rotate=True, visual_update=True):
+
+        if not visual_update:
+            rospy.set_param('/use_servoing', False)
 
         lin_step = 0.0
         # ee_start_position = self.ee_position

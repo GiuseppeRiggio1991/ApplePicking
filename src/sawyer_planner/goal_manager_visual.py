@@ -9,6 +9,8 @@ import os
 import sys
 from rgb_segmentation.srv import GetCutPoint
 from geometry_msgs.msg import PoseArray
+from geometry_msgs.msg import PoseStamped
+from sawyer_planner.msg import GoalUpdate
 
 def callback(_):
 
@@ -18,7 +20,7 @@ if __name__ == '__main__':
     rospy.init_node('goal_manager_visual')
 
     cut_service = rospy.ServiceProxy('cut_point_srv', GetCutPoint)
-    pub = rospy.Publisher('/update_goal_point', PoseArray, queue_size=1)
+    pub = rospy.Publisher('/update_goal_point', GoalUpdate, queue_size=1)
 
     rate = rospy.Rate(10)
     while not rospy.is_shutdown():
@@ -27,6 +29,7 @@ if __name__ == '__main__':
             rate.sleep()
             continue
         rospy.loginfo_throttle(0.1, 'Trying to update goal...')
+        current_pose = rospy.wait_for_message('manipulator_pose', PoseStamped)
         try:
             response = cut_service().cut_points
         except Exception as e:
@@ -35,7 +38,11 @@ if __name__ == '__main__':
                 continue
             raise e
 
-        pub.publish(response)
+        msg = GoalUpdate()
+        msg.points = response
+        msg.pose = current_pose
+
+        pub.publish(msg)
 
 
 
