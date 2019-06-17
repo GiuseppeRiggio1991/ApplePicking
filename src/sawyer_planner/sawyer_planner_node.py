@@ -347,6 +347,9 @@ class SawyerPlanner:
 
             rospy.loginfo('{} points of interest found!'.format(len(cut_points_msg.cut_points.poses)))
             pose_array = cut_points_msg.cut_points
+            pose_array = self.refine_points(pose_array)
+            if len(pose_array.poses) != len(cut_points_msg.cut_points.poses):
+                rospy.loginfo('(Condensed to {} points)'.format(len(pose_array.poses)))
 
         if ee_pose is None:
             ee_pose = self.ee_pose
@@ -385,6 +388,59 @@ class SawyerPlanner:
         #     noise_cut_point_pose = numpy.dot(T_off, noise_cut_point_pose)
         #     noise_cut_point_pose = numpy.dot(self.ee_pose, noise_cut_point_pose)
         #     self.noise_array = numpy.asarray(noise_cut_point_pose[:3, 3]).reshape(1, 3)
+
+    def refine_points(self, pose_array):
+        """
+        Clusters detected points with some given threshold together,
+        and condenses them into a point representing the centroid.
+        """
+
+        refine_threshold = rospy.get_param('segment_refine_threshold', 0.03)
+
+        new_pose_array = PoseArray()
+        positions = np.array([[p.position.x, p.position.y, p.position.z] for p in pose_array.poses])
+
+        all_rows = set(range(positions.shape[0]))
+        assigned = set()
+
+        for row_index in all_rows:
+
+            if row_index in assigned:
+                continue
+
+            cluster_points = []
+
+            frontier = [row_index]
+            while frontier:
+                cluster_points.extend(frontier)
+                assigned.update(frontier)
+                new_frontier = []
+                for base_index in frontier:
+                    for compare_index in all_rows.difference(assigned):
+                        if compare_index == row_index:
+                            continue
+
+                        # Compare two row magnitudes, see if they're in refine threshold
+                        # If they are, add to the new frontier
+                        if np.sqrt(np.sum((positions[base_index,:] - positions[compare_index,:]) ** 2)) < refine_threshold:
+                            new_frontier.append(compare_index)
+
+
+
+
+                frontier = new_frontier
+
+            centroid = positions[cluster_points, :].mean(axis=0)
+
+            new_pose = Pose()
+            new_pose.position.x = centroid[0]
+            new_pose.position.y = centroid[1]
+            new_pose.position.z = centroid[2]
+
+            new_pose_array.poses.append(new_pose)
+
+        return new_pose_array
+
 
     def update_goal(self, msg):
 
