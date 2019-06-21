@@ -17,6 +17,7 @@ find_package(catkin REQUIRED COMPONENTS
   dynamixel_workbench_toolbox
   message_generation
   geometry_msgs
+  sensor_msgs
   online_planner
   task_planner
 )
@@ -58,16 +59,16 @@ catkin_python_setup()
 ##   * add every package in MSG_DEP_SET to generate_messages(DEPENDENCIES ...)
 
 ## Generate messages in the 'msg' folder
-# add_message_files(
-#   FILES
-#   Message1.msg
-#   Message2.msg
-# )
+add_message_files(
+  FILES
+  GoalUpdate.msg
+)
 
 ## Generate services in the 'srv' folder
  add_service_files(
    FILES
    AppleCheck.srv
+   CheckBranchOrientation.srv
  )
 
 ## Generate actions in the 'action' folder
@@ -82,6 +83,7 @@ catkin_python_setup()
    DEPENDENCIES
    std_msgs
    geometry_msgs
+   sensor_msgs
  )
 
 ################################################
@@ -116,7 +118,7 @@ catkin_python_setup()
 catkin_package(
   INCLUDE_DIRS include
 #  LIBRARIES sawyer_planner
-  CATKIN_DEPENDS roscpp rospy std_msgs std_srvs online_planner hydra_utils dynamixel_workbench_msgs dynamixel_workbench_toolbox 
+  CATKIN_DEPENDS roscpp rospy std_msgs std_srvs online_planner hydra_utils dynamixel_workbench_msgs dynamixel_workbench_toolbox message_runtime
 #  DEPENDS system_lib
 )
 

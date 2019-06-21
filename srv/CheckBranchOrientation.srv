@@ -1,0 +1,5 @@
+geometry_msgs/Point target
+sensor_msgs/PointCloud2 cloud
+---
+geometry_msgs/Point point_1
+geometry_msgs/Point point_2
