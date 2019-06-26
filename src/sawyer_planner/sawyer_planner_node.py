@@ -135,6 +135,7 @@ class SawyerPlanner:
         self.apple_check_client = rospy.ServiceProxy("/sawyer_planner/apple_check", AppleCheck)
         self.start_pipeline_client = rospy.ServiceProxy("/sawyer_planner/start_pipeline", Trigger)
         self.plan_pose_client = rospy.ServiceProxy("/plan_pose_srv", PlanPose)
+        self.plan_joints_client = rospy.ServiceProxy("/plan_joints_srv", PlanJoints)
         self.optimise_offset_client = rospy.ServiceProxy("/optimise_offset_srv", OptimiseTrajectory)
         self.optimise_trajectory_client = rospy.ServiceProxy("/optimise_trajectory_srv", OptimiseTrajectory)
         self.sequencer_client = rospy.ServiceProxy("/sequence_tasks_srv", SequenceTasks)
@@ -381,6 +382,10 @@ class SawyerPlanner:
                 name = module.SendCommand(
                     'loadURI ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/ur5_cutter.urdf'
                     + ' ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/ur5_cutter.srdf')
+            elif self.robot_name == "ur5_cutter_test":
+                name = module.SendCommand(
+                    'loadURI ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/ur5_cutter_test.urdf'
+                    + ' ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/ur5_cutter_test.srdf')
             else:
                 rospy.logerr("invalid robot name, exiting...")
                 sys.exit()              
@@ -1129,7 +1134,8 @@ class SawyerPlanner:
 
         for it in iter_arr:
             # rad = rad_step * it + (numpy.pi / 2)
-            rad = rad_step * it + numpy.pi
+            rad = rad_step * it + numpy.pi/4 + numpy.pi
+            # rad = rad_step * it + numpy.pi
             # rad = rad_step * it
             print rad
             x = 0.25 * math.cos(rad)
@@ -1182,7 +1188,20 @@ class SawyerPlanner:
 
                 if self.sequencing_metric == 'fredsmp' or self.sequencing_metric == 'hybrid':
                     # resp = self.optimise_offset_client(self.sequenced_trajectories[self.current_apples_ind], self.sim)
-                    resp = self.optimise_offset_client(self.sequenced_trajectories[self.current_apples_ind], True)
+                    # goals = numpy.array(deepcopy(self.goal_array))
+                    tasks_msg = PoseArray()
+                    tasks_msg.poses.append(plan_pose_msg)
+
+                    resp_sequencer = self.sequencer_client.call(tasks_msg, self.sequencing_metric)
+                    if len(resp_sequencer.database_trajectories):
+                        joint_msg = JointState()
+                        joint_msg.position = resp_sequencer.database_trajectories[0].points[-1].positions
+                        # resp = self.plan_joints_client(joint_msg, ignore_trellis, True)
+                        # resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, True)
+                        resp = self.optimise_offset_client(resp_sequencer.database_trajectories[0], True)
+                    else:
+                        continue
+                    # resp = self.optimise_offset_client(self.sequenced_trajectories[self.current_apples_ind], True)
                 elif self.sequencing_metric == 'euclidean':
                     # resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, self.sim)
                     resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, True)
