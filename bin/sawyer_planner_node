@@ -12,8 +12,8 @@ import pyquaternion
 LOGGING = True
 # sequencing_metrics = ['hybrid', 'euclidean', 'fredsmp']
 # sequencing_metrics = ['fredsmp', 'euclidean']
-sequencing_metrics = ['euclidean']
-# sequencing_metrics = ['fredsmp']
+# sequencing_metrics = ['euclidean']
+sequencing_metrics = ['fredsmp']
 num_targets = 2
 num_experiments = 1
 
@@ -50,8 +50,10 @@ def gen_goal_and_noise_arrays(planner, num_targets=1):
     solutions_offset = []
     for i in range(num_targets):  # ensure target is reachable
         while len(solutions) == 0:
-            rand_x = random.uniform(0.65, 0.75)
-            rand_y = random.uniform(-0.35, 0.35)
+            # rand_x = random.uniform(0.65, 0.75)
+            # rand_y = random.uniform(-0.35, 0.35)
+            rand_x = random.uniform(0.2, 0.75)
+            rand_y = 1.15-rand_x
             rand_z = random.uniform(0.2, 0.7)
             target = [rand_x, rand_y, rand_z]
             T_robot = transform_target_start(target, planner)
