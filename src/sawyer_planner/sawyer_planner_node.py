@@ -1286,8 +1286,18 @@ class SawyerPlanner:
                 plan_pose_msg.orientation.w = pose[0]
 
                 if self.sequencing_metric == 'fredsmp' or self.sequencing_metric == 'hybrid':
-                    # resp = self.optimise_offset_client(self.sequenced_trajectories[self.current_goal_index], self.sim)
-                    resp = self.optimise_offset_client(self.sequenced_trajectories[self.current_goal_index], True)
+                    tasks_msg = PoseArray()
+                    tasks_msg.poses.append(plan_pose_msg)
+
+                    resp_sequencer = self.sequencer_client.call(tasks_msg, self.sequencing_metric)
+                    if len(resp_sequencer.database_trajectories):
+                        joint_msg = JointState()
+                        joint_msg.position = resp_sequencer.database_trajectories[0].points[-1].positions
+                        # resp = self.plan_joints_client(joint_msg, ignore_trellis, True)
+                        # resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, True)
+                        resp = self.optimise_offset_client(resp_sequencer.database_trajectories[0], True)
+                    else:
+                        continue
                 elif self.sequencing_metric == 'euclidean':
                     # resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, self.sim)
                     resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, True)   # Moves it into place
