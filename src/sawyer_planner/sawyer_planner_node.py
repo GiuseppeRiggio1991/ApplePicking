@@ -1275,36 +1275,31 @@ class SawyerPlanner:
             resp = self.check_ray_srv(self.pose_to_ros_msg(pose))
 
             if not resp.collision:
-                def temp(position, pose):
-                    plan_pose_msg = Pose()
-                    plan_pose_msg.position.x = position[0]
-                    plan_pose_msg.position.y = position[1]
-                    plan_pose_msg.position.z = position[2]
-                    plan_pose_msg.orientation.x = pose[1]
-                    plan_pose_msg.orientation.y = pose[2]
-                    plan_pose_msg.orientation.z = pose[3]
-                    plan_pose_msg.orientation.w = pose[0]
 
-                    if self.sequencing_metric == 'fredsmp' or self.sequencing_metric == 'hybrid':
-                        # resp = self.optimise_offset_client(self.sequenced_trajectories[self.current_goal_index], self.sim)
-                        resp = self.optimise_offset_client(self.sequenced_trajectories[self.current_goal_index], True)
-                    elif self.sequencing_metric == 'euclidean':
-                        # resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, self.sim)
-                        resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, True)   # Moves it into place
-                    else:
-                        raise ValueError()
+                plan_pose_msg = Pose()
+                plan_pose_msg.position.x = position[0]
+                plan_pose_msg.position.y = position[1]
+                plan_pose_msg.position.z = position[2]
+                plan_pose_msg.orientation.x = pose[1]
+                plan_pose_msg.orientation.y = pose[2]
+                plan_pose_msg.orientation.z = pose[3]
+                plan_pose_msg.orientation.w = pose[0]
 
-                    return resp
-
-                resp = temp(*self.get_goal_approach_pose(self.goal, offset, angles[index], reference)[:2])
-
-
+                if self.sequencing_metric == 'fredsmp' or self.sequencing_metric == 'hybrid':
+                    # resp = self.optimise_offset_client(self.sequenced_trajectories[self.current_goal_index], self.sim)
+                    resp = self.optimise_offset_client(self.sequenced_trajectories[self.current_goal_index], True)
+                elif self.sequencing_metric == 'euclidean':
+                    # resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, self.sim)
+                    resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, True)   # Moves it into place
+                else:
+                    raise ValueError()
 
                 if not resp.success:
                     rospy.logwarn("planning to next target failed")
                 else:
                     rospy.sleep(1.0)
                     return resp.success, resp.plan_duration, resp.traj_duration
+
         return False, numpy.nan, numpy.nan
 
     def plan_to_joints(self, joints):
