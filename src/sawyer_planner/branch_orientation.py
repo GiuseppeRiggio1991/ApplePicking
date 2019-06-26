@@ -94,7 +94,7 @@ def process_orientation(msg):
 
     return response
 
-rospy.Service('plan_pose_srv', CheckBranchOrientation, process_orientation)
+rospy.Service('branch_orientation', CheckBranchOrientation, process_orientation)
 rviz_pub = rospy.Publisher("visualization_marker", Marker, queue_size=1)
 
 rospy.spin()
