@@ -232,7 +232,7 @@ class SawyerPlanner:
                 diff = ref_point - goal
                 diff = diff / np.sqrt((diff**2).sum())
                 # This is where the elevation difference comes in
-                diff[2] = -0.5
+                diff[2] = np.random.uniform(-3, 3)
 
                 ref_point = goal + diff
 
@@ -1216,7 +1216,11 @@ class SawyerPlanner:
             _, _, base_pose_mat = self.get_goal_approach_pose(goal, offset, angle, None)
             assumed_camera_inverse = self.get_camera_pose(ee_pose=base_pose_mat, reverse=True)
             target = self.get_cutter_goal_orientation(goal, orientation_reference, assumed_camera_inverse)
-            up_axis = [0, math.sin(target), -math.cos(target)]
+
+            # Up axis should be defined in world frame
+            # Thus we transform a vector in the camera's XY frame to one in the world frame
+            camera_frame_up_axis = [-np.sin(target), np.cos(target), 0, 0]  # Last 0 is dummy for matrix mult
+            up_axis = np.linalg.inv(assumed_camera_inverse).dot(camera_frame_up_axis)[:3]
 
         else:
             up_axis = [0, 0, -1]
