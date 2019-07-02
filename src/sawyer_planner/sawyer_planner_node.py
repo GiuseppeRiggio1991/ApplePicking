@@ -1252,30 +1252,47 @@ class SawyerPlanner:
         manip = self.computeReciprocalConditionNumber(joints)
         return manip
 
+    def generate_feasible_approach_angles(self, angle_from_center=np.pi/4, samples=9):
+
+        if not self.orientation_array:
+            raise ValueError('Can only compute feasible approach angles if orientations are defined!')
+
+        goal_xy = self.goal_array[self.current_goal_index][:2]
+        ref_xy = self.orientation_array[self.current_goal_index][:2]
+
+        diff_vec = goal_xy - ref_xy
+        perp_vec = np.array([-diff_vec[1], diff_vec[0]])
+
+        # Orient the perpendicular vector so that it faces outwards from the robot
+        # This is used so we don't try to cut branches from the other side of the branch
+        if perp_vec.dot(goal_xy) < 0:
+            perp_vec = -perp_vec
+
+        # Base angle is the perpendicular approach vector in the world frame
+        # Note that the vector is negated due to how to get_goal_approach_pose() defines the angle
+        base_angle = math.atan2(-perp_vec[1], -perp_vec[0])
+
+        angle_deviations = np.linspace(-angle_from_center, angle_from_center, num=samples, endpoint=True)
+        ordering = np.argsort(np.abs(angle_deviations))
+
+        return (base_angle + angle_deviations)[ordering]
 
     def plan_to_goal(self, offset = 0.25, angle = None, ignore_trellis=False):
 
-        # Current just linear sampling
-        if angle is None:
-            angles = np.linspace(0, 2*np.pi, 32, endpoint=False)
-        else:
+
+        if angle is not None:
             angles = [angle]
+        else:
+            angles = self.generate_feasible_approach_angles()
 
-        manips = [self.evaluate_goal_approach_manipulability(angle, offset) for angle in angles]
+        reference = self.orientation_array[self.current_goal_index]
 
-        # TODO: Copy-pasted
-        try:
-            reference = self.orientation_array[self.current_goal_index]
-        except IndexError:
-            rospy.logwarn('No orientation found, assuming no rotation desired')
-            reference = None
+        for angle in angles:
 
-        ordering = np.argsort(manips)[::-1]
-        for index in ordering:
-            if manips[index] < self.MIN_MANIPULABILITY_RECOVER:
-                break       # Indexes ordered by manipulability, no need to check further
+            if self.evaluate_goal_approach_manipulability(angle, offset) < self.MIN_MANIPULABILITY_RECOVER:
+                continue
 
-            position, pose, _ = self.get_goal_approach_pose(self.goal, offset, angles[index], orientation_reference=reference)
+            position, pose, _ = self.get_goal_approach_pose(self.goal, offset, angle, orientation_reference=reference)
             resp = self.check_ray_srv(self.pose_to_ros_msg(pose))
 
             if not resp.collision:
