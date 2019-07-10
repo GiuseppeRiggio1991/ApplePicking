@@ -1106,29 +1106,26 @@ class SawyerPlanner:
         if not visual_update:
             rospy.set_param('/use_servoing', False)
 
-        lin_step = 0.0
         # ee_start_position = self.ee_position
-        if goal[0] == None:
+        self_goal = False
+        if goal[0] is None:
             goal = deepcopy(self.goal)
             self_goal = True
             rospy.loginfo("goal: " + str(goal))
-            goal_off = deepcopy(self.goal_off)
-            if 1:
-            # if self.sim:
-                # update goal_off because ee_position changes
-                goal_off = goal - offset * self.normalize(goal - self.ee_position)
-
-        else:
-            self_goal = False
-            if to_goal[0] == None:
-                goal_off = goal - offset * self.normalize(goal - self.ee_position)
-            else:
-                goal_off = goal - offset * self.normalize(to_goal)
-
 
         self.last_goal_update = rospy.Time.now()
 
-        while numpy.linalg.norm(goal - self.ee_position) > 0.001 and not rospy.is_shutdown():
+        # Computes position of arm relative to goal so that we can know when we've moved past goal
+        starting_ee_goal_vector = (np.array(goal) - self.ee_position)[:2]
+
+        # Main loop which servos towards the goal
+        while not rospy.is_shutdown():
+
+            ee_goal_vector = (np.array(goal) - self.ee_position)[:2]
+
+            # Termination condition
+            if numpy.linalg.norm(goal - self.ee_position) < 0.001 or np.dot(ee_goal_vector, starting_ee_goal_vector) < 0:
+                break
 
             if self_goal:  # means servo'ing to a dynamic target
 
@@ -1155,16 +1152,15 @@ class SawyerPlanner:
                 if not self.sim:
                     self.enable_bridge_pub.publish(Bool(True))
 
-            # check if joints are outside the limits
-            # joints = self.arm.joint_angles()
-            # joints = joints.values()[::-1]  # need to reverse because method's ordering is j6-j0
-
             if not self.is_in_joint_limits():
                 return 1
-                # sys.exit()
 
-
+            # Computes the velocity of linear movement
+            MIN_VEL = 0.015
             des_vel_t = self.K_V * (goal - self.ee_position)
+            total_vel = np.linalg.norm(des_vel_t)
+            if total_vel < MIN_VEL:
+                des_vel_t = des_vel_t * (MIN_VEL / total_vel)
 
             if not rotate:
                 des_omega = np.zeros(3)
