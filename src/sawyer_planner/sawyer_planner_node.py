@@ -69,8 +69,7 @@ class SawyerPlanner:
         self.ee_position = None
         self.ee_pose = []
         self.apple_offset = [0.0, 0.0, 0.0]
-        # self.go_to_goal_offset = [0.05, 0.0, 0.0]
-        self.go_to_goal_offset = 0.12  # offset from apple centre to sawyer end effector frame (not gripper)
+        self.go_to_goal_offset = 0.25  # How far should the EE be from the target for the approach position?
         self.limits_epsilon = 0.01
         self.K_V = 0.3
         self.K_VQ = 2.5
@@ -232,7 +231,7 @@ class SawyerPlanner:
                 diff = ref_point - goal
                 diff = diff / np.sqrt((diff**2).sum())
                 # This is where the elevation difference comes in
-                diff[2] = np.random.uniform(-3, 3)
+                diff[2] = random.choice([0.5, 10, -0.5, -10])
 
                 ref_point = goal + diff
 
@@ -759,11 +758,10 @@ class SawyerPlanner:
             self.recovery_trajectory = []
 
             time_start = rospy.get_time()
-            # status = self.go_to_goal([None], numpy.array([1.0, 0.0, 0.0]), self.go_to_goal_offset)
             rospy.sleep(2.0)
             rospy.set_param('/going_to_goal', True)
             try:
-                status = self.go_to_goal([None], numpy.array([None]), self.go_to_goal_offset)
+                status = self.go_to_goal()
             finally:
                 self.stop_arm()
                 rospy.set_param('/going_to_goal', False)
@@ -916,17 +914,16 @@ class SawyerPlanner:
 
     def sequence_goals(self):
 
-        # TODO: Fix this
-
         if not len(self.goal_array):
             self.goal = [None]
             return
         if len(self.sequenced_goals) == 0:
             goals = numpy.array(deepcopy(self.goal_array))
             tasks_msg = PoseArray()
-            for goal in goals:
-                T = openravepy.transformLookat(goal, goal - [0.25, 0.0, 0.0], [0, 0, -1])
-                pose = openravepy.poseFromMatrix(T)
+
+            for goal, orientation_reference in zip(goals, self.orientation_array):
+                angle = self.generate_feasible_approach_angles(samples=1, goal=goal, orientation_reference=orientation_reference)
+                _, pose, _ = self.get_goal_approach_pose(goal, self.go_to_goal_offset, angle, orientation_reference)
                 pose_msg = Pose()
                 pose_msg.orientation.w = pose[0]
                 pose_msg.orientation.x = pose[1]
@@ -938,6 +935,9 @@ class SawyerPlanner:
                 tasks_msg.poses.append(pose_msg)
 
             resp = self.sequencer_client.call(tasks_msg, self.sequencing_metric)
+            if not len(resp.sequence):
+                raise Exception('The sequencer failed to return a proper sequence!')
+
             self.sequenced_goals = [goals[i] for i in resp.sequence]
             self.orientation_array = [self.orientation_array[i] for i in resp.sequence]
 
@@ -1101,14 +1101,14 @@ class SawyerPlanner:
         return lin_point_
 
         
-    def go_to_goal(self, goal = [None], to_goal = [None], offset = 0.0, rotate=True, visual_update=True):
+    def go_to_goal(self, goal = None, rotate=True, visual_update=True):
 
         if not visual_update:
             rospy.set_param('/use_servoing', False)
 
         # ee_start_position = self.ee_position
         self_goal = False
-        if goal[0] is None:
+        if goal is None:
             goal = deepcopy(self.goal)
             self_goal = True
             rospy.loginfo("goal: " + str(goal))
@@ -1164,19 +1164,10 @@ class SawyerPlanner:
 
             if not rotate:
                 des_omega = np.zeros(3)
-            elif to_goal[0] != None:
-                des_omega = - self.K_VQ * self.get_angular_velocity([None], to_goal)
             else:
                 des_omega = - self.K_VQ * self.get_angular_velocity(goal)
 
-            #print("omega: " + str(des_omega))
-
-            #des_omega = numpy.array([0.0, 0.0, 0.0])
-
             des_vel = numpy.append(des_vel_t, des_omega)
-
-            #print "goal: ", self.goal, " off: ", self.goal_off
-            #print "des_vel: ", des_vel
 
             #singularity check
             if not self.is_greater_min_manipulability():
@@ -1248,25 +1239,49 @@ class SawyerPlanner:
         manip = self.computeReciprocalConditionNumber(joints)
         return manip
 
-    def generate_feasible_approach_angles(self, angle_from_center=np.pi/4, samples=9):
+    def generate_feasible_approach_angles(self, angle_from_center=np.pi/4, samples=9, goal=None, orientation_reference=None):
 
         if not self.orientation_array:
             raise ValueError('Can only compute feasible approach angles if orientations are defined!')
 
-        goal_xy = self.goal_array[self.current_goal_index][:2]
-        ref_xy = self.orientation_array[self.current_goal_index][:2]
+        # First, check if the branch looks sufficiently vertical, subject to some threshold.
+        # If so, any approach angle should be fine, so we choose ones in line with the base
 
-        diff_vec = goal_xy - ref_xy
-        perp_vec = np.array([-diff_vec[1], diff_vec[0]])
+        VERTICAL_ANGLE_REF = math.radians(15.0)
 
-        # Orient the perpendicular vector so that it faces outwards from the robot
-        # This is used so we don't try to cut branches from the other side of the branch
-        if perp_vec.dot(goal_xy) < 0:
-            perp_vec = -perp_vec
+        if goal is None:
+            goal = np.array(self.goal_array[self.current_goal_index])
+
+        if orientation_reference is None:
+            ref = self.orientation_array[self.current_goal_index]
+        else:
+            ref = orientation_reference
+
+
+        goal_xy = goal[:2]
+        ref_xy = ref[:2]
+
+        diff = goal - ref
+        normalized_diff = diff / np.linalg.norm(diff)
+
+        if np.abs(normalized_diff[2]) > math.cos(VERTICAL_ANGLE_REF):
+            rospy.loginfo('This branch looks vertical, choosing angles appropriately...')
+            perp_vec = goal_xy
+
+        else:
+            diff_vec = goal_xy - ref_xy
+            perp_vec = np.array([-diff_vec[1], diff_vec[0]])
+
+            # Orient the perpendicular vector so that it faces outwards from the robot
+            # This is used so we don't try to cut branches from the other side of the branch
+            if perp_vec.dot(goal_xy) < 0:
+                perp_vec = -perp_vec
 
         # Base angle is the perpendicular approach vector in the world frame
         # Note that the vector is negated due to how to get_goal_approach_pose() defines the angle
         base_angle = math.atan2(-perp_vec[1], -perp_vec[0])
+        if samples == 1:
+            return base_angle
 
         angle_deviations = np.linspace(-angle_from_center, angle_from_center, num=samples, endpoint=True)
         ordering = np.argsort(np.abs(angle_deviations))
@@ -1459,7 +1474,7 @@ class SawyerPlanner:
                     # Otherwise, in a real implementation, the camera moves with the arm
                     # Therefore we need to express the goal points in the view of the new position of the camera
                     # so that we can properly filter out the octomap
-                    camera_pose = numpy.dot(self.ee_pose, self.camera_offset_matrix)
+                    camera_pose = self.get_camera_pose()
 
                 goal_point_world_mat = numpy.identity(4)
                 goal_point_world_mat[0:3, 3] = point
