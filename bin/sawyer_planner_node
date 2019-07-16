@@ -6,15 +6,22 @@ from sawyer_planner import sawyer_planner_node
 import sys
 import random
 import numpy
+import numpy as np
 import openravepy
 import pyquaternion
+import cPickle
+import math
+import rospkg
+import os
+from sensor_msgs.msg import JointState
+from pprint import pprint
 
 LOGGING = True
 # sequencing_metrics = ['hybrid', 'euclidean', 'fredsmp']
 # sequencing_metrics = ['fredsmp', 'euclidean']
-# sequencing_metrics = ['euclidean']
+#sequencing_metrics = ['euclidean']
 sequencing_metrics = ['fredsmp']
-num_targets = 2
+num_targets = 5
 num_experiments = 1
 
 def transform_target_start(target, planner):
@@ -45,6 +52,7 @@ def gen_goal_and_noise_arrays(planner, num_targets=1):
     # random.seed(time.time())
     # numpy.random.seed(time.time())
     goal_array = []
+    orientation_array = []
     noise_array = []
     solutions = []
     solutions_offset = []
@@ -66,10 +74,25 @@ def gen_goal_and_noise_arrays(planner, num_targets=1):
             #             openravepy.IkFilterOptions.CheckEnvCollisions)
         goal_array.append(target)
 
+        # Add the orientation reference in; tries to make branch "tangent" to robot arm
+
+        goal = np.array(target)
+        angle = math.atan2(goal[1], goal[0])
+        r = np.sqrt(goal[0] ** 2 + goal[1] ** 2)
+        rx, ry = r * math.cos(angle + 0.01), r * math.sin(angle + 0.01)  # Creates branch "tangent" to radius
+        rz = goal[2]
+
+        ref_point = np.array([rx, ry, rz])
+        diff = ref_point - goal
+        diff = diff / np.sqrt((diff ** 2).sum())
+        # This is where the elevation difference comes in
+        diff[2] = random.choice([0.5, 10, -0.5, -10])
+
+        ref_point = goal + diff
+
+        orientation_array.append(ref_point)
+
         while len(solutions_offset) == 0:  # ensure noisy target is reachable
-            # x_noise = numpy.random.normal(0.1, 0.05)
-            # y_noise = numpy.random.normal(0.0, 0.05)
-            # z_noise = numpy.random.normal(0.0, 0.05)
             x_noise = numpy.random.normal(0.01, 0.01)
             y_noise = numpy.random.normal(0.0, 0.1)
             z_noise = numpy.random.normal(0.0, 0.1)
@@ -88,13 +111,7 @@ def gen_goal_and_noise_arrays(planner, num_targets=1):
         solutions = []
     noise_array = numpy.asarray(noise_array)
 
-
-    # add Gaussian noise
-    # x_noise = numpy.random.normal(0.1, 0.075, len(goal_array))
-    # y_noise = numpy.random.normal(0.0, 0.075, len(goal_array))
-    # z_noise = numpy.random.normal(0.0, 0.075, len(goal_array))
-    # noise_array = numpy.vstack((x_noise, y_noise, z_noise)).transpose()
-    return goal_array, noise_array
+    return goal_array, orientation_array, noise_array
 
 
 if __name__ == "__main__":
@@ -110,6 +127,33 @@ if __name__ == "__main__":
     else:
         sim = False
 
+    existing_config = {}
+    file_path = ''
+    if len(sys.argv) > 1:
+        config_file_name = sys.argv[1].strip()
+
+        rospack = rospkg.RosPack()
+        config_dir = os.path.join(rospack.get_path('sawyer_planner'), 'configs')
+        if not os.path.exists(config_dir):
+            os.makedirs(config_dir)
+        try:
+            file_path = os.path.join(config_dir, config_file_name)
+            with open(file_path, 'rb') as fh:
+                existing_config = cPickle.load(fh)
+                rospy.loginfo('Found existing config {}'.format(config_file_name))
+                pprint(existing_config)
+        except IOError:
+            if sim:
+                raise ValueError('Could not find a "{}" config file, and running on sim!'.format(config_file_name))
+            else:
+                rospy.loginfo('Will create new config "{}" based on current arm configuration and goals'.format(config_file_name))
+
+    goal_array = existing_config.get('goal', None)
+    orientation_array = existing_config.get('orientation', None)
+    noise_array = existing_config.get('noise', None)
+    starting_joints = existing_config.get('starting_joints', None)
+
+
     USE_RGB_SEG = rospy.get_param('/use_camera', False) and rospy.get_param('/target_color', False)
 
     if rospy.has_param('/robot_name'):
@@ -120,55 +164,55 @@ if __name__ == "__main__":
         print "no robot_name param, using sawyer "
         robot_name = "sawyer"
 
-    last_joints = []
-
     still_running = True
     if sim:
-        planner = sawyer_planner_node.SawyerPlanner('euclidean', sim, robot_name=robot_name)
-        home_pose = [
-            [-0.99, 0.04, 0.13, 0.2],
-            [-0.13, -0.30, -0.94, -0.4],
-            [0.00, -0.95, 0.30, 0.85],
-            [0.00, 0.00, 0.00, 1.00]
-        ]
-        # home_pose_solutions = self.or_env.ikmodel.manip.FindIKSolutions(
-        #     home_pose, openravepy.IkFilterOptions.CheckEnvCollisions
-        # )
-        # T_robot = transform_target_start(target, planner)
-        pose_msg = planner.pose_to_ros_msg(openravepy.poseFromMatrix(home_pose))
-        resp = planner.find_ik_solutions_srv(pose_msg, False)
-        solutions = resp.solutions
-        print(solutions[0])
         for i in range(num_experiments):
             rospy.loginfo("STARTING EXPERIMENT " + str(i))
-            rand_int = random.randint(0, len(solutions) - 1)
-            last_joints = solutions[rand_int].position
-            goal_array, noise_array = [], []
-            if not USE_RGB_SEG:
-                goal_array, noise_array = gen_goal_and_noise_arrays(planner, num_targets)
+
+            # Generate cut points, but only if we're not using a pre-existing configuration
+            if not existing_config and not USE_RGB_SEG:
+                planner = sawyer_planner_node.SawyerPlanner('euclidean', sim, robot_name=robot_name)
+                goal_array, orientation_array, noise_array = gen_goal_and_noise_arrays(planner, num_targets)
 
             for metric in sequencing_metrics:
                 rospy.loginfo("METRIC: " + metric)
                 still_running = True
-                planner = sawyer_planner_node.SawyerPlanner(metric, sim, goal_array, noise_array, last_joints, robot_name=robot_name)
+                planner = sawyer_planner_node.SawyerPlanner(metric, sim, goal_array, orientation_array, noise_array, starting_joints, robot_name=robot_name)
                 while still_running and not rospy.is_shutdown():
-
                     still_running = planner.update()
                     rate.sleep()
         planner.go_to_start()
 
     else:
-        metric = 'euclidean'
-        planner = sawyer_planner_node.SawyerPlanner(metric, sim, robot_name=robot_name)
-        while still_running and not rospy.is_shutdown():
-            # print(planner.goal_array)
-            # planner.sequence_goals()
-            still_running = planner.update()
+        metric = sequencing_metrics[0]
 
-            rate.sleep()
+        planner = sawyer_planner_node.SawyerPlanner(metric, sim, goal_array, orientation_array, noise_array, robot_name=robot_name)
+        if not existing_config and file_path:
+            planner.rgb_segment_set_goal()
+            config_to_save = {}
+            config_to_save['goal'] = planner.goal_array
+            config_to_save['noise'] = planner.noise_array
+            config_to_save['orientation'] = planner.orientation_array
+            config_to_save['starting_joints'] = rospy.wait_for_message('manipulator_joints', JointState).position
+            with open(file_path, 'wb') as fh:
+                cPickle.dump(config_to_save, fh)
+            rospy.loginfo('Saved start config {}'.format(config_file_name))
+            pprint(config_to_save)
 
-        planner.stop_arm()
-        planner.go_to_start()
+        if existing_config:
+            planner.plan_to_joints(starting_joints)
+            planner.initial_joints.position = starting_joints
+
+        try:
+            while still_running and not rospy.is_shutdown():
+                # print(planner.goal_array)
+                # planner.sequence_goals()
+                still_running = planner.update()
+
+                rate.sleep()
+        finally:
+            planner.stop_arm()
+            planner.go_to_start()
 
 
     rospy.on_shutdown(planner.clean)
