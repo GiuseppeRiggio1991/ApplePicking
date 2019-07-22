@@ -38,6 +38,9 @@ if __name__ == '__main__':
                 continue
             raise e
 
+        if not rospy.get_param('/going_to_goal', False):
+            continue
+
         msg = GoalUpdate()
         msg.points = response
         msg.pose = current_pose

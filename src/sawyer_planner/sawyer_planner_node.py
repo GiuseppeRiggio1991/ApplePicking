@@ -45,10 +45,11 @@ LOGGING = True
 CONTINUOUS_NOISE = True
 HOME_POSE = True
 
+
 class SawyerPlanner:
 
     def __init__(self, metric, sim=False, goal_array=None, orientation_array = None, noise_array=None,
-                 starting_joints=None, robot_name="sawyer"):
+                 starting_joints=None, robot_name=None):
 
         if goal_array is None:
             goal_array = np.array([])
@@ -61,6 +62,9 @@ class SawyerPlanner:
             noise_array = np.array([])
 
         self.robot_name = robot_name
+        if self.robot_name is None:
+            self.robot_name = rospy.get_param('robot_name')
+
         print self.robot_name
         self.STATE = enum.Enum('STATE', 'SEARCH TO_NEXT APPROACH GRAB CHECK_GRASPING TO_DROP DROP RECOVER')
         self.sim = sim
@@ -156,7 +160,7 @@ class SawyerPlanner:
         self.sequencer_client = rospy.ServiceProxy("/sequence_tasks_srv", SequenceTasks)
         self.set_robot_joints = rospy.ServiceProxy('set_robot_joints', SetRobotJoints)
         self.find_ik_solutions_srv = rospy.ServiceProxy('find_ik_solutions', FindIKSolutions)
-        self.draw_point_srv = rospy.ServiceProxy('draw_point', DrawPoint)
+        self.draw_point_pub = rospy.Publisher('draw_point', Point, queue_size=1)
         self.draw_branch_srv = rospy.ServiceProxy('draw_branch', DrawBranch)
         self.clear_point_srv = rospy.ServiceProxy('clear_point', Empty)
         self.check_ray_srv = rospy.ServiceProxy('test_check_ray', CheckRay)
@@ -185,7 +189,7 @@ class SawyerPlanner:
         rospy.Subscriber('/update_goal_point', GoalUpdate, self.update_goal, queue_size = 1)
         self.goal_updating_mutex = False
         self.last_goal_update = None
-        self.stop_update_threshold = rospy.get_param('/stop_update_threshold', 0.015)
+        self.stop_update_threshold = rospy.get_param('/stop_update_threshold', 0.05)
 
         if self.sim:
             self.stop_arm()
@@ -659,7 +663,7 @@ class SawyerPlanner:
 
             draw_point_msg = Point(self.goal[0], self.goal[1], self.goal[2])
             self.draw_branch_srv(start, end)
-            self.draw_point_srv(draw_point_msg)
+            self.draw_point_pub.publish(draw_point_msg)
 
             plan_success, plan_duration, traj_duration = self.plan_to_goal()
             # elapsed_time = rospy.get_time() - time_start
@@ -782,7 +786,6 @@ class SawyerPlanner:
             rospy.sleep(1.0)
             if not self.sim:
                 self.enable_bridge_pub.publish(Bool(False)) 
-                # rospy.sleep(1.0)
 
         elif self.state == self.STATE.RECOVER:
 
@@ -960,11 +963,11 @@ class SawyerPlanner:
             msg.velocities = joint_vel
             self.sim_joint_velocities_pub.publish(msg)
         else:
-            if rospy.get_param('/robot_name') == "sawyer":
+            if self.robot_name == "sawyer":
                 cmd = self.arm.joint_velocities()
                 cmd = dict(zip(cmd.keys(), joint_vel[::-1]))
                 self.arm.set_joint_velocities(cmd)
-            elif rospy.get_param('/robot_name').startswith("ur5") or rospy.get_param('/robot_name') == "ur10":
+            elif self.robot_name.startswith("ur5") or self.robot_name == "ur10":
                 self.s.send("stopj(2)" + "\n")
 
     def is_in_joint_limits(self):
@@ -1024,7 +1027,6 @@ class SawyerPlanner:
         lin_point_ = [x + step * y for x, y in zip(from_point, norm)]
         return lin_point_
 
-        
     def go_to_goal(self, goal = None, rotate=True, visual_update=True):
 
         if not visual_update:
@@ -1063,12 +1065,12 @@ class SawyerPlanner:
                 self.recovery_trajectory.append(copy(self.manipulator_joints))
 
             draw_point_msg = Point(goal[0], goal[1], goal[2])
-            self.draw_point_srv(draw_point_msg)
+            self.draw_point_pub.publish(draw_point_msg)
 
             rospy.loginfo_throttle(0.5, "ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
 
             if numpy.linalg.norm(self.ee_position - self.goal) < self.stop_update_threshold:
-                rospy.loginfo_throttle(1.0, "disabling updating of apple position because too close")
+                # rospy.loginfo_throttle(1.0, "disabling updating of apple position because too close")
                 rotate = False
                 if not self.sim:
                     self.enable_bridge_pub.publish(Bool(False))
@@ -1098,27 +1100,29 @@ class SawyerPlanner:
                 return 2
             else:
                 joint_vel = self.compute_joint_vel(des_vel)
-                # print("joint_vel: " + str(joint_vel))
-                if self.sim:
-                    msg = JointTrajectoryPoint()
-                    msg.velocities = joint_vel
-                    self.sim_joint_velocities_pub.publish(msg)
-                else:
-                    if rospy.get_param('/robot_name') == "sawyer":
-                        cmd = self.arm.joint_velocities()
-                        cmd = dict(zip(cmd.keys(), joint_vel[::-1]))
-                        self.arm.set_joint_velocities(cmd)
-                    elif rospy.get_param('/robot_name').startswith("ur5") or rospy.get_param('/robot_name') == "ur10":
-                        cmd = str("speedj([%.5f,%.5f,%.5f,%.5f,%.5f,%.5f],5.0,0.05)" % tuple(joint_vel)) + "\n"
-                        # print ("CMD: " + cmd)
-                        self.s.send(cmd)
-
-            # rospy.sleep(0.01)
+                self.send_velocity_command(joint_vel)
 
         self.stop_arm()
         if self.sim:
             self.clear_point_srv()
         return 0
+
+
+    def send_velocity_command(self, joint_vel):
+        if self.sim:
+            msg = JointTrajectoryPoint()
+            msg.velocities = joint_vel
+            self.sim_joint_velocities_pub.publish(msg)
+        else:
+            if self.robot_name == "sawyer":
+                cmd = self.arm.joint_velocities()
+                cmd = dict(zip(cmd.keys(), joint_vel[::-1]))
+                self.arm.set_joint_velocities(cmd)
+            elif self.robot_name.startswith("ur5") or self.robot_name == "ur10":
+                cmd = str("speedj([%.5f,%.5f,%.5f,%.5f,%.5f,%.5f],5.0,0.05)" % tuple(joint_vel)) + "\n"
+                # print ("CMD: " + cmd)
+                self.s.send(cmd)
+
 
     def get_goal_approach_pose(self, goal, offset, angle, orientation_reference=None):
 

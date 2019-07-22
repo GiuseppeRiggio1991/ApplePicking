@@ -9,6 +9,7 @@
     <param name="use_camera" value="$(arg use_camera)" />
     <param name="robot_ip" value="$(arg ip)" />
     <param name="use_servoing" value="$(arg use_servoing)" />
+    <param name="tool_speed" value="0.160" />
 
     <param name="/segment_color" value="blue" />
 
