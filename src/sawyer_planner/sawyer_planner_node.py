@@ -33,11 +33,8 @@ from online_planner.srv import *
 from task_planner.srv import *
 from localisation.srv import *
 from rgb_segmentation.srv import *
-from tf.transformations import quaternion_from_euler, euler_from_quaternion, euler_matrix
 from tf import TransformListener
 from tf2_ros import TransformListener as TransformListener2, Buffer
-# from task_planner.msgs import *
-from sawyer_planner.msg import GoalUpdate
 
 import pyquaternion
 import socket
@@ -432,7 +429,7 @@ class SawyerPlanner:
         # add a 90 degree (e.g. measuring a horizontal branch is 0 degrees, which corresponds with a vertical cutter
         # orientation
 
-            target = (branch_angle + np.pi / 2) % np.pi - np.pi / 2
+        target = (branch_angle + np.pi / 2) % np.pi - np.pi / 2
         return target
 
     def refine_points(self, pose_array):
