@@ -62,6 +62,7 @@ catkin_python_setup()
 add_message_files(
   FILES
   GoalUpdate.msg
+  PlannerGoal.msg
 )
 
 ## Generate services in the 'srv' folder
@@ -69,6 +70,7 @@ add_message_files(
    FILES
    AppleCheck.srv
    CheckBranchOrientation.srv
+   SetGoal.srv
  )
 
 ## Generate actions in the 'action' folder

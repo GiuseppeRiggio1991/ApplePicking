@@ -14,7 +14,11 @@ import math
 import rospkg
 import os
 from sensor_msgs.msg import JointState
+from geometry_msgs.msg import Point
 from pprint import pprint
+from sawyer_planner.point_selector import PointSelector
+from sawyer_planner.msg import PlannerGoal
+from copy import deepcopy
 
 LOGGING = True
 # sequencing_metrics = ['hybrid', 'euclidean', 'fredsmp']
@@ -111,22 +115,27 @@ def gen_goal_and_noise_arrays(planner, num_targets=1):
         solutions = []
     noise_array = numpy.asarray(noise_array)
 
-    return goal_array, orientation_array, noise_array
+    # Temp: Ignore noise array
+    final_goals = []
+    for goal, orientation in zip(goal_array, orientation_array):
+        final_goal = PlannerGoal()
+        final_goal.goal = Point(*goal)
+        final_goal.orientation = Point(*orientation)
+        final_goals.append(final_goal)
+
+    return final_goals
 
 
 if __name__ == "__main__":
 
     rospy.init_node('sawyer_planner')
     rate = rospy.Rate(1000)
-    # sim = False
-    # if len(sys.argv) > 1:
-    #     if sys.argv[1] == 'sim':
-    #         sim = True
     if rospy.has_param("sim"):
         sim = rospy.get_param("sim")
     else:
         sim = False
 
+    # Load an existing configuration, or create a new one if it doesn't exist
     existing_config = {}
     file_path = ''
     if len(sys.argv) > 1:
@@ -143,62 +152,79 @@ if __name__ == "__main__":
                 rospy.loginfo('Found existing config {}'.format(config_file_name))
                 pprint(existing_config)
         except IOError:
-            if sim:
-                raise ValueError('Could not find a "{}" config file, and running on sim!'.format(config_file_name))
-            else:
-                rospy.loginfo('Will create new config "{}" based on current arm configuration and goals'.format(config_file_name))
+            rospy.loginfo('Will create new config "{}" based on current arm configuration and goals'.format(config_file_name))
 
-    goal_array = existing_config.get('goal', None)
-    orientation_array = existing_config.get('orientation', None)
-    noise_array = existing_config.get('noise', None)
+    goals = existing_config.get('goal', None)
     starting_joints = existing_config.get('starting_joints', None)
 
+    robot_name = rospy.get_param('robot_name', 'sawyer')
+    rospy.loginfo('Robot name: {}'.format(robot_name))
 
-    USE_RGB_SEG = rospy.get_param('/use_camera', False) and rospy.get_param('/target_color', False)
+    # If the config doesn't exist, try to load it based off the parameters
+    # Configs can be loaded in 3 ways: Randomly generated points, RGB segmentation, or picking using the RViz interface
 
-    if rospy.has_param('/robot_name'):
-        print "rospy.get_param: "
-        print rospy.get_param("/robot_name")
-        robot_name = rospy.get_param("/robot_name")
-    else:
-        print "no robot_name param, using sawyer "
-        robot_name = "sawyer"
+    if not existing_config:
+
+        use_camera = rospy.get_param('/use_camera', False)
+        target_color = rospy.get_param('/target_color', False)
+
+        dummy_planner = sawyer_planner_node.SawyerPlanner('euclidean', [], sim=sim, robot_name=robot_name)
+
+        if use_camera:
+            if target_color:
+                raise NotImplementedError('Segmenting off color is temporarily disabled')
+                # # If we have an RGB target set, we're assumed to be color-based tracking (e.g. colored tape)
+                # dummy_planner.rgb_segment_set_goal()
+                # goal_array = dummy_planner.goal_array
+                # orientation_array = dummy_planner.orientation_array
+                # noise_array = dummy_planner.noise_array
+
+            else:
+                # If we don't have an RGB target but we're using the camera, we use the point selector in RViz
+                # to select the points we want
+                selector = PointSelector('base_link', '/camera/depth_registered/points_z_filtered')
+                selector.wait_for_inputs()
+                goals = selector.goals
+
+                del selector
+
+        else:
+            # Otherwise we just randomly select points
+            goals = gen_goal_and_noise_arrays(dummy_planner, num_targets)
+        del dummy_planner
+
+        # If we passed in a name for this config, go ahead and save it
+        if file_path:
+            config_to_save = {
+                'goal': goals,
+                'starting_joints': rospy.wait_for_message('manipulator_joints', JointState).position
+            }
+
+            with open(file_path, 'wb') as fh:
+                cPickle.dump(config_to_save, fh)
+            rospy.loginfo('Saved start config {}'.format(config_file_name))
+
+
+    # Run the planner loops
 
     still_running = True
     if sim:
         for i in range(num_experiments):
             rospy.loginfo("STARTING EXPERIMENT " + str(i))
 
-            # Generate cut points, but only if we're not using a pre-existing configuration
-            if not existing_config and not USE_RGB_SEG:
-                planner = sawyer_planner_node.SawyerPlanner('euclidean', sim, robot_name=robot_name)
-                goal_array, orientation_array, noise_array = gen_goal_and_noise_arrays(planner, num_targets)
-
             for metric in sequencing_metrics:
                 rospy.loginfo("METRIC: " + metric)
                 still_running = True
-                planner = sawyer_planner_node.SawyerPlanner(metric, sim, goal_array, orientation_array, noise_array, starting_joints, robot_name=robot_name)
+                planner = sawyer_planner_node.SawyerPlanner(metric, goals, sim=sim, starting_joints=starting_joints,
+                                                            robot_name=robot_name)
                 while still_running and not rospy.is_shutdown():
                     still_running = planner.update()
                     rate.sleep()
-        planner.go_to_start()
 
     else:
         metric = sequencing_metrics[0]
 
-        planner = sawyer_planner_node.SawyerPlanner(metric, sim, goal_array, orientation_array, noise_array, robot_name=robot_name)
-        if not existing_config and file_path:
-            planner.rgb_segment_set_goal()
-            config_to_save = {}
-            config_to_save['goal'] = planner.goal_array
-            config_to_save['noise'] = planner.noise_array
-            config_to_save['orientation'] = planner.orientation_array
-            config_to_save['starting_joints'] = rospy.wait_for_message('manipulator_joints', JointState).position
-            with open(file_path, 'wb') as fh:
-                cPickle.dump(config_to_save, fh)
-            rospy.loginfo('Saved start config {}'.format(config_file_name))
-            pprint(config_to_save)
-
+        planner = sawyer_planner_node.SawyerPlanner(metric, goals, sim=sim, robot_name=robot_name)
         if existing_config:
             planner.plan_to_joints(starting_joints)
             planner.initial_joints.position = starting_joints

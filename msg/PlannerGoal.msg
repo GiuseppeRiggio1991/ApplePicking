@@ -1,0 +1,3 @@
+geometry_msgs/Point goal
+geometry_msgs/Point orientation
+geometry_msgs/Point camera

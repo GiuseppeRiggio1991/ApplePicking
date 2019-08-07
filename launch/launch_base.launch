@@ -4,14 +4,12 @@
     <arg name="ip" default="127.0.0.1" />
     <arg name="robot" default="ur5" />
     <arg name="use_camera" default="false" />
-    <arg name="use_servoing" default="true" />
 
     <param name="use_camera" value="$(arg use_camera)" />
     <param name="robot_ip" value="$(arg ip)" />
-    <param name="use_servoing" value="$(arg use_servoing)" />
     <param name="tool_speed" value="0.160" />
 
-    <param name="/segment_color" value="blue" />
+    <param name="/segment_color" value="" />
 
     <group unless="$(arg sim)">
         <include file="$(find ur_modern_driver)/launch/ur5e_bringup.launch">
@@ -28,15 +26,17 @@
         </include>
     </group>
     <group if="$(arg use_camera)">
+        <node name="map_camera_publisher" pkg="tf" type="static_transform_publisher" args="0.0266 0.0475 -0.10 0 0 0 1 or_ee_link camera_link 10" />
         <include file="$(find realsense2_camera)/launch/rs_rgbd.launch" />
-        <include file="$(find rgb_segmentation)/launch/rgb_segmentation.launch" />
+<!--        <include file="$(find rgb_segmentation)/launch/rgb_segmentation.launch" />-->
         <include file="$(find sawyer_planner)/launch/pcl_filter_nodelet.launch" />
-        <node name="goal_updater" pkg="sawyer_planner" type="goal_manager_visual.py" unless="$(arg sim)" />
-        <node name="branch_orientation" pkg="sawyer_planner" type="branch_orientation.py" unless="$(arg sim)" />
-        <remap from="image" to="/camera/color/image_raw" />
-        <node name="image_display" pkg="image_view" type="image_view" />
+        <node name="background_detector" pkg="sawyer_planner" type="background_detector.py" />
+        <node name="point_tracker" pkg="sawyer_planner" type="point_tracker.py" unless="$(arg sim)" output="screen" />
+        <node name="branch_orientation" pkg="sawyer_planner" type="branch_orientation.py" />
     </group>
 
-
+    <group unless="$(arg use_camera)">
+        <node name="map_camera_publisher" pkg="tf" type="static_transform_publisher" args="0.0266 0.0625 -0.10 -0.5 0.5 -0.5 0.5 or_ee_link camera_color_optical_frame 10" />
+    </group>
 
 </launch>
