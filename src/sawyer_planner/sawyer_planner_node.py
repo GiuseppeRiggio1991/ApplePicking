@@ -92,11 +92,9 @@ class SawyerPlanner:
         self.num_joints = len(self.robot_arm_indices)
 
         # Segmentation logic
-        use_camera = rospy.get_param('/use_camera', False)
-
-
+        self.use_camera = rospy.get_param('/use_camera', False)
         self.target_color = rospy.get_param('/target_color', False)
-        self.rgb_seg = use_camera and bool(self.target_color)
+        self.rgb_seg = self.use_camera and bool(self.target_color)
 
         if self.robot_name == "sawyer":
             self.T_G2EE = numpy.array([
@@ -138,7 +136,7 @@ class SawyerPlanner:
         self.update_octomap = rospy.ServiceProxy('/update_octomap', Empty)
         self.update_octomap_filtered = rospy.ServiceProxy('/update_octomap_filtered', Empty)
 
-        if use_camera and not self.target_color:
+        if self.use_camera and not self.target_color:
             self.activate_point_tracker = rospy.ServiceProxy('/activate_point_tracker', Empty)
             self.deactivate_point_tracker = rospy.ServiceProxy('/deactivate_point_tracker', Empty)
             self.point_tracker_set_goal = rospy.ServiceProxy('point_tracker_set_goal', SetGoal)
@@ -1280,7 +1278,7 @@ class SawyerPlanner:
 
     def refresh_octomap(self, point = None, camera_frame=False):
 
-        if not self.rgb_seg:
+        if not self.use_camera:
             return
 
         if point is None:
