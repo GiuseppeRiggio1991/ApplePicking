@@ -8,6 +8,7 @@ from sensor_msgs.msg import PointCloud2
 import numpy as np
 from numpy.linalg import svd
 from visualization_msgs.msg import Marker
+from ros_numpy import numpify
 
 rospy.init_node('branch_orientation')
 
@@ -55,19 +56,12 @@ def process_orientation(msg):
 
     target = msg.target
     target = np.array([target.x, target.y, target.z])
+    assert np.abs(target).sum() > 0
     cloud = msg.cloud
     response = CheckBranchOrientationResponse()
 
-    point_generator = read_points(cloud, skip_nans=True, field_names=('x', 'y', 'z'))
-    all_points = np.array(list(point_generator))
-
-    # Temporary, the point cloud should be prefiltered?
-    all_points = all_points[all_points[:,2] < 1.0]
-    all_points = all_points[all_points[:,2] > 0.30]
-
-    if not target.sum():
-        target = all_points[np.random.randint(0, all_points.shape[0]), :]
-
+    pts_struct = numpify(cloud)[['x', 'y', 'z']]
+    all_points = pts_struct.view((pts_struct.dtype[0], 3))
 
     rviz_publish_point(Point(*target), cloud.header.frame_id)
 
