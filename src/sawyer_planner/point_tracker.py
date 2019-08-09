@@ -50,8 +50,7 @@ class PointTracker(object):
             [478, 182],
             [485, 238],
             [511, 275],
-            [537, 276],
-            [640, 175],
+            [640, 275],
             [640, -1],
         ]))     # Note that 639 and 0 are inflated to 640 and -1 due to edge detection ambiguities
 
@@ -150,7 +149,7 @@ class PointTracker(object):
         mask = np.asarray(self.bridge.imgmsg_to_cv2(fg_mask, desired_encoding="passthrough")).T  # Index as [x,y]
         positive_pixel_points = np.array(np.where(mask == 255)).T
 
-        goal_in_image, line_info = self.reconcile_goal_with_branch_points(goal, mask == 255, camera_info)
+        goal_in_image, line_info = self.reconcile_goal_with_branch_points(goal, mask == 255, camera_info, max_jump=0.05)
         new_goal_in_image = snap_reference_to_2d_points(goal_in_image, positive_pixel_points, 40, min_density=0.05)
 
         # Take the point cloud points, filter them to points within a certain distance of the previous goal
