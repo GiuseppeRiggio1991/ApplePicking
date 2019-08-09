@@ -966,6 +966,8 @@ class SawyerPlanner:
             if numpy.linalg.norm(self.ee_position - self.current_goal) < self.stop_update_threshold:
                 # rospy.loginfo_throttle(1.0, "disabling updating of apple position because too close")
                 rotate = False
+                self.deactivate_point_tracker()
+                rospy.loginfo_throttle(5, 'Point tracking disabled!')
                 if not self.sim:
                     self.enable_bridge_pub.publish(Bool(False))
             else:
