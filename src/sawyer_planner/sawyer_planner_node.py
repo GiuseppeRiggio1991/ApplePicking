@@ -33,8 +33,8 @@ from online_planner.srv import *
 from task_planner.srv import *
 from localisation.srv import *
 from rgb_segmentation.srv import *
-from tf import TransformListener
 from tf2_ros import TransformListener as TransformListener2, Buffer
+from tf2_geometry_msgs import do_transform_point
 
 import pyquaternion
 import socket
@@ -129,7 +129,6 @@ class SawyerPlanner:
         self.clear_point_srv = rospy.ServiceProxy('clear_point', Empty)
         self.check_ray_srv = rospy.ServiceProxy('test_check_ray', CheckRay)
         self.cut_point_srv = rospy.ServiceProxy('cut_point_srv', GetCutPoint)
-        self.set_manipulator_srv = rospy.ServiceProxy('set_manipulator', SetManipulator)
         self.get_orientation_srv = rospy.ServiceProxy('branch_orientation', CheckBranchOrientation)
 
         self.load_octomap = rospy.ServiceProxy('/load_octomap', LoadOctomap)
@@ -146,11 +145,8 @@ class SawyerPlanner:
             self.point_tracker_set_goal = dummy_function
         
         #self.enable_bridge_pub.publish(Bool(True))
-        # TODO: Replace tf_listener to use only tf2
-        self.tf_listener = TransformListener()
-
-        self.tf2_buffer = Buffer()
-        self.tf2_listener = TransformListener2(self.tf2_buffer)
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener2(self.tf_buffer)
 
         rospy.Subscriber('manipulator_pose', PoseStamped, self.get_robot_ee_position, queue_size = 1)
         rospy.Subscriber('manipulator_joints', JointState, self.get_robot_joints, queue_size = 1)
@@ -160,7 +156,13 @@ class SawyerPlanner:
         self.initial_joints = rospy.wait_for_message('manipulator_joints', JointState)
         self.camera_offset_matrix = self.get_transform_matrix('manipulator', 'camera_color_optical_frame')
 
-        # rospy.Subscriber('/update_goal_point', GoalUpdate, self.update_goal, queue_size = 1)
+        # Get the offset between the manipulator target and the point that actually does the cutting
+        tf = self.retrieve_tf('manipulator', 'cutpoint')
+        trans = tf.transform.translation
+        self.manipulator_cutpoint_offset = PointStamped()
+        self.manipulator_cutpoint_offset.header.frame_id = 'manipulator'
+        self.manipulator_cutpoint_offset.point = Point(trans.x, trans.y, trans.z)
+
         rospy.Subscriber('/update_goal_point', Point, self.update_goal, queue_size=1)
 
         self.stop_update_threshold = rospy.get_param('/stop_update_threshold', 0.03)
@@ -200,20 +202,6 @@ class SawyerPlanner:
                 rospy.logerr("it seems like you should be running the node in sim mode, exiting.")
                 sys.exit()
 
-        #self.enable_bridge_pub.publish(Bool(False))
-
-        # open the TCP socket to the planner
-        # I will parametrize all this stuff
-        # TCP_IP = '192.168.1.103' 
-        # TCP_PORT = 5007
-        # self.BUFFER_SIZE = 1024
-        # self.socket_handler = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # self.socket_handler.settimeout(2.0)
-        # self.socket_handler.connect((TCP_IP, TCP_PORT))
-
-
-
-        # rospy.Timer(rospy.Duration(0.05), self.socket_handshake)
 
         if LOGGING:
             import rospkg
@@ -244,6 +232,18 @@ class SawyerPlanner:
     def current_orientation_ref_array(self):
         return point_as_array(self.goals[self.current_sequence_index].orientation)
 
+
+    def retrieve_tf(self, base_frame, target_frame, stamp = rospy.Time()):
+
+        # Retrieves a TransformStamped with a child frame of base_frame and a target frame of target_frame
+        # This transform can be applied to a point in the base frame to transform it to the target frame
+
+        success = self.tf_buffer.can_transform(target_frame, base_frame, stamp, rospy.Duration(0.5))
+        if not success:
+            rospy.logerr("Couldn't look up transform between {} and {}!".format(target_frame, base_frame))
+
+        tf = self.tf_buffer.lookup_transform(target_frame, base_frame, stamp)
+        return tf
 
 
     def go_to_start(self):
@@ -329,12 +329,13 @@ class SawyerPlanner:
         Retrieves transform from base_frame to target_frame.
         Note that this means that applying this matrix to a point will transform it from target_frame to base_frame
         """
-
         if t is None:
             t = rospy.Time(0)
-        trans, rot = self.tf_listener.lookupTransform(base_frame, target_frame, t)
+        tf = self.retrieve_tf(target_frame, base_frame, t)
+        trans = tf.transform.translation
+        rot = tf.transform.rotation
 
-        or_pose = [rot[3], rot[0], rot[1], rot[2], trans[0], trans[1], trans[2]]
+        or_pose = [rot.w, rot.x, rot.y, rot.z, trans.x, trans.y, trans.z]
         return openravepy.matrixFromPose(or_pose)
 
 
@@ -481,6 +482,9 @@ class SawyerPlanner:
 
     def update_goal(self, pt):
 
+        if self.state != self.STATE.APPROACH:
+            return
+
         self.current_goal = np.array([pt.x, pt.y, pt.z])
         rospy.loginfo_throttle(2, 'Current goal: {:.3f}, {:.3f}, {:.3f}'.format(*self.current_goal))
 
@@ -605,26 +609,10 @@ class SawyerPlanner:
             rospy.loginfo("APPROACH")
 
             # When running on a real arm, a new position means new occlusions will be present!
-            # self.refresh_octomap()  # Disabled for now because the approach doesn't actually utilize octomap collision avoidance
-            #start = time.time()
 
-            #while (self.goal[0] == None) and (time.time() - start < 20.0) :
-            #    pass
             if not self.sim:
                 self.enable_bridge_pub.publish(Bool(True)) 
-            # rospy.sleep(1.0)
 
-            # self.K_VQ = 2.5 # 66666
-
-            # apple_check_srv = AppleCheckRequest()
-            # apple_check_srv.apple_pose.x = self.goal[0];
-            # apple_check_srv.apple_pose.y = self.goal[1];
-            # apple_check_srv.apple_pose.z = self.goal[2];
-
-            # resp = self.apple_check_client.call(apple_check_srv)
-
-            # if resp.apple_is_there:
-            # if 1:
             print("apple is there, going to grab")
 
             self.recovery_trajectory = []
@@ -638,6 +626,11 @@ class SawyerPlanner:
                 rospy.set_param('/going_to_goal', False)
 
             elapsed_time = rospy.get_time() - time_start
+
+            final_goal = deepcopy(self.ee_position)
+            deviation = np.linalg.norm(final_goal - self.current_goal_array)
+            rospy.loginfo('Final approach position was {:.1f} cm off from the original point'.format(deviation))
+
             if status == 0:
                 self.state = self.STATE.GRAB
                 self.results_dict['Approach Time'].append(elapsed_time)
@@ -670,14 +663,18 @@ class SawyerPlanner:
 
             rospy.loginfo("GRAB")
             try:
-                self.set_manipulator_srv(String('cutpoint'))
-                rospy.sleep(rospy.Duration.from_sec(2.))  # Hack to make sure the ee position updates
 
-                self.servo_to_goal(rotate=False)
+                # We want to move the manipulator so that the branch is in the cut point
+                # Do this by taking the offset between the endpoint and cutter, treating it as
+                # a point in the manipulator's frame of view, and adjusting the world goal accordingly
+
+                tf = self.retrieve_tf('manipulator', 'base_link')
+                pt = do_transform_point(self.manipulator_cutpoint_offset, tf)
+                self.current_goal = point_as_array(pt)
+
+                self.servo_to_goal(rotate=False, use_visual=False)
             finally:
-                self.deactivate_point_tracker()
                 self.stop_arm()
-                self.set_manipulator_srv(String('arm'))
 
             #self.enable_bridge_pub.publish(Bool(False))
 
@@ -933,23 +930,18 @@ class SawyerPlanner:
             else:
                 return True
 
-    def lin_point(self, from_point, look_at, step=0.1):
-        uvec = [x1 - x2 for x1, x2 in zip(look_at, from_point)]
-        umag = math.sqrt((uvec[0])**2 + (uvec[1])**2 + (uvec[2])**2)
-        norm = [x / umag for x in uvec]
-        lin_point_ = [x + step * y for x, y in zip(from_point, norm)]
-        return lin_point_
 
-    def servo_to_goal(self, rotate=True):
-
-        if self.current_goal is None or self.current_goal[0] is None:
-            raise ValueError("You haven't set a goal to servo towards!")
+    def servo_to_goal(self, rotate=True, use_visual=True):
 
         goal = deepcopy(self.current_goal)
+
         rospy.loginfo("Servoing to goal: {:.3f}, {:.3f}, {:.3f}".format(*goal))
 
-        self.point_tracker_set_goal(self.goals[self.current_sequence_index])
-        self.activate_point_tracker()
+        if use_visual:
+
+            # TODO: A bit hacky, service requires PlannerGoal point, but self.current_goal can be numpy array which differs from PlannerGoal
+            self.point_tracker_set_goal(self.goals[self.current_sequence_index])
+            self.activate_point_tracker()
 
         # Computes position of arm relative to goal so that we can know when we've moved past goal
         starting_ee_goal_vector = (np.array(goal) - self.ee_position)[:2]
