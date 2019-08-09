@@ -180,7 +180,8 @@ class PointTracker(object):
 
         goal.point = Point(*new_goal)
 
-        self.goal = do_transform_point(goal, inv_camera_tf)
+        if self.active:     # In case point tracker gets deactivated while this process is running
+            self.goal = do_transform_point(goal, inv_camera_tf)
 
         self.mutex = False
 
