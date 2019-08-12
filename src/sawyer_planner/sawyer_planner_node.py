@@ -526,7 +526,7 @@ class SawyerPlanner:
     def save_logs(self):
         if LOGGING:
 
-            file_name = 'results_{}_{}'.format(self.sequencing_metric, time.strftime("%Y%m%d-%H%M%S"))
+            file_name = 'results_{}_{}{}'.format(self.sequencing_metric, time.strftime("%Y%m%d-%H%M%S"), '_sim' if self.sim else '')
             file_path = os.path.join(self.directory, file_name)
 
             df = self.logger.output_df()
