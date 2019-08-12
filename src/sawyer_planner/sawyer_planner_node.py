@@ -31,6 +31,7 @@ from rgb_segmentation.srv import *
 from tf2_ros import TransformListener as TransformListener2, Buffer
 from tf2_geometry_msgs import do_transform_point
 from collections import defaultdict
+from pandas import DataFrame
 
 import pyquaternion
 import socket
@@ -1422,5 +1423,4 @@ class Logger(object):
         self.set_value(key, value)
 
     def output_df(self):
-        import pandas as pd
-        return pd.DataFrame(self.log).T.reindex(columns=self.fields)
+        return DataFrame(self.log).T.reindex(columns=self.fields)
