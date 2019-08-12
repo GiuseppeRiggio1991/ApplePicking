@@ -5,14 +5,9 @@ import enum
 import openravepy
 import numpy
 import numpy as np
-import prpy
-import sys
 import os
-import random
 from openravepy.misc import InitOpenRAVELogging
-from prpy.planning.cbirrt import CBiRRTPlanner
 from copy import *
-import csv
 import json
 import math
 
@@ -28,13 +23,14 @@ from trajectory_msgs.msg import JointTrajectory
 from std_msgs.msg import Float32MultiArray
 from std_msgs.msg import Bool, String
 from std_srvs.srv import SetBool, Trigger, Empty
-from sawyer_planner.srv import AppleCheck, AppleCheckRequest, AppleCheckResponse, CheckBranchOrientation, SetGoal
+from sawyer_planner.srv import CheckBranchOrientation, SetGoal
 from online_planner.srv import *
 from task_planner.srv import *
 from localisation.srv import *
 from rgb_segmentation.srv import *
 from tf2_ros import TransformListener as TransformListener2, Buffer
 from tf2_geometry_msgs import do_transform_point
+from collections import defaultdict
 
 import pyquaternion
 import socket
@@ -115,7 +111,6 @@ class SawyerPlanner:
         self.sim_joint_velocities_pub = rospy.Publisher('sim_joint_velocities', JointTrajectoryPoint, queue_size=1)
 
         self.gripper_client = rospy.ServiceProxy('/gripper_action', SetBool)
-        self.apple_check_client = rospy.ServiceProxy("/sawyer_planner/apple_check", AppleCheck)
         self.start_pipeline_client = rospy.ServiceProxy("/sawyer_planner/start_pipeline", Trigger)
         self.plan_pose_client = rospy.ServiceProxy("/plan_pose_srv", PlanPose)
         self.plan_joints_client = rospy.ServiceProxy("/plan_joints_srv", PlanJoints)
@@ -203,6 +198,7 @@ class SawyerPlanner:
                 sys.exit()
 
 
+        self.logger = Logger()
         if LOGGING:
             import rospkg
             rospack = rospkg.RosPack()
@@ -528,6 +524,14 @@ class SawyerPlanner:
 
     def save_logs(self):
         if LOGGING:
+
+            file_name = 'results_{}_{}'.format(self.sequencing_metric, time.strftime("%Y%m%d-%H%M%S"))
+            file_path = os.path.join(self.directory, file_name)
+
+            df = self.logger.output_df()
+            df.to_pickle(file_path + '.pickle')
+            df.to_csv(file_path + '.csv')
+
             results_filename = self.directory_metric + '/results_' + time.strftime("%Y%m%d-%H%M%S")
             fails_filename = self.directory_metric + '/fails_' + time.strftime("%Y%m%d-%H%M%S")
 
@@ -546,14 +550,18 @@ class SawyerPlanner:
 
         if self.state == self.STATE.SEARCH:
 
+            self.logger.start_timer('octomap_time')
             rospy.loginfo("SEARCH")
             self.refresh_octomap()
+            self.logger.end_timer('octomap_time')
 
             # Sequence the goals here
-            time_start = rospy.get_time()
+
+            self.logger.start_timer('sequencing_time')
             self.sequence_goals()
-            elapsed_time = rospy.get_time() - time_start
-            self.results_dict['Sequencing Time'].append(elapsed_time)
+            elapsed = self.logger.end_timer('sequencing_time')
+
+            self.results_dict['Sequencing Time'].append(elapsed)
 
             self.state = self.STATE.TO_NEXT
         
@@ -561,6 +569,8 @@ class SawyerPlanner:
 
             rospy.loginfo("TO_NEXT")
             self.current_iteration += 1
+            self.logger.increment_iteration()
+
             rospy.loginfo("current apple ind: " + str(self.current_iteration))
 
             # rospy.sleep(1.0)  # TODO: avoid exiting before subscriber updates new apple goal, 666 should replace with something more elegant
@@ -580,9 +590,10 @@ class SawyerPlanner:
             self.openrave_draw_branch()
 
             plan_success, plan_duration, traj_duration = self.plan_to_goal()
-            # elapsed_time = rospy.get_time() - time_start
-            # print("self.goal: " + str(self.goal))
-            # raw_input('press enter to continue...')
+
+            self.logger['planning_time'] = plan_duration
+            self.logger['traj_time'] = traj_duration
+            self.logger[['gx', 'gy', 'gz']] = self.current_goal_array
 
             rospy.logwarn("TRAJ DURATION: " + str(traj_duration))
             if plan_success:
@@ -617,19 +628,22 @@ class SawyerPlanner:
 
             self.recovery_trajectory = []
 
-            time_start = rospy.get_time()
+            self.logger.start_timer('servoing_time')
             try:
                 status = self.servo_to_goal()
             finally:
                 self.deactivate_point_tracker()
                 self.stop_arm()
                 rospy.set_param('/going_to_goal', False)
-
-            elapsed_time = rospy.get_time() - time_start
+            elapsed_time = self.logger.end_timer('servoing_time')
 
             final_goal = deepcopy(self.ee_position)
             deviation = np.linalg.norm(final_goal - self.current_goal_array)
             rospy.loginfo('Final approach position was {:.1f} cm off from the original point'.format(deviation))
+
+            self.logger['status'] = status
+            self.logger.set_value(['fgx', 'fgy', 'fgz'], final_goal)
+
 
             if status == 0:
                 self.state = self.STATE.GRAB
@@ -672,7 +686,10 @@ class SawyerPlanner:
                 pt = do_transform_point(self.manipulator_cutpoint_offset, tf)
                 self.current_goal = point_as_array(pt)
 
+                self.logger.start_timer('cutting_time')
                 self.servo_to_goal(rotate=False, use_visual=False)
+                self.logger.end_timer('cutting_time')
+
             finally:
                 self.stop_arm()
 
@@ -705,7 +722,10 @@ class SawyerPlanner:
                 print("self.recovery_trajectory[-1]: " + str(self.recovery_trajectory[-1]))
                 print("self.recovery_trajectory[0]: " + str(self.recovery_trajectory[0]))
                 traj_msg = self.list_trajectory_msg(self.recovery_trajectory[::-1])
+
+                self.logger.start_timer('recovery_time')
                 resp = self.optimise_trajectory_client.call(traj_msg, LOGGING)
+                self.logger.end_timer('recovery_time')
                 if not resp.success:
                     rospy.logerr("could not move back to drop, don't know how to recover, exiting...")
                     return False
@@ -731,7 +751,10 @@ class SawyerPlanner:
                 print("self.recovery_trajectory[-1]: " + str(self.recovery_trajectory[-1]))
                 print("self.recovery_trajectory[0]: " + str(self.recovery_trajectory[0]))
                 traj_msg = self.list_trajectory_msg(self.recovery_trajectory[::-1])
+                self.logger.start_timer('recovery_time')
                 resp = self.optimise_trajectory_client.call(traj_msg, LOGGING)
+                self.logger.end_timer('recovery_time')
+
                 self.stop_arm()
                 if not resp.success:
                     rospy.logerr("could not move back to drop, don't know how to recover, exiting...")
@@ -823,7 +846,7 @@ class SawyerPlanner:
                 raise Exception('The sequencer failed to return a proper sequence!')
 
             if len(resp.sequence) != len(self.goals):
-                rospy.logwarn('The sequencer only returned {} out of {} goal points!'.format(len(resp.sequence), goals.shape[0]))
+                rospy.logwarn('The sequencer only returned {} out of {} goal points!'.format(len(resp.sequence), len(self.goals)))
 
             self.sequence = resp.sequence
             print("resp.sequence: " + str(resp.sequence))
@@ -1339,3 +1362,65 @@ def point_as_array(pt):
 
 def dummy_function(*_, **__):
     pass
+
+
+class Logger(object):
+    def __init__(self):
+
+        self.active_timers = {}
+        self.iteration = 0
+        self.log = defaultdict(dict)
+
+        self.fields = [
+            'gx', 'gy', 'gz',           # What are the goal coordinates?
+            'a', 'r',                   # What angle did it approach relative to the base frame? What was the roll
+            'fgx', 'fgy', 'fgz',        # During the visual update phase, what goal did the cutter eventually settle on?
+
+            # Moving to next approach
+            'planning_time', 'traj_time',
+            'traj_dist',
+
+            # Related to servoing
+            'servoing_time',
+            'cutting_time',
+            'recovery_time',
+            'status',                   # What sort of error did we run into, if any?
+
+            'sequencing_time', 'octomap_time',  # One-time costs incurred in the first iteration
+        ]
+
+    def start_timer(self, event):
+        assert event in self.fields
+        if event in self.active_timers:
+            raise Exception('Attempting to start timing an event which is still running')
+        self.active_timers[event] = time.time()
+
+    def end_timer(self, event):
+        end = time.time()
+        start = self.active_timers.pop(event)
+        self.log[self.iteration][event] = end - start
+        return end - start
+
+    def increment_iteration(self):
+        if self.active_timers:
+            raise Exception('Attempting to increment iteration while timers are running')
+
+        self.iteration += 1
+
+    def set_value(self, field, value):
+
+        if isinstance(field, list):
+            for key, val in zip(field, value):
+                self.set_value(key, val)
+            return
+
+        assert field in self.fields
+
+        self.log[self.iteration][field] = value
+
+    def __setitem__(self, key, value):
+        self.set_value(key, value)
+
+    def output_df(self):
+        import pandas as pd
+        return pd.DataFrame(self.log).T.reindex(columns=self.fields)
