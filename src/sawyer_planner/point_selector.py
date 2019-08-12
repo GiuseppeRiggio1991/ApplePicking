@@ -64,7 +64,9 @@ class PointSelector(object):
 
     def wait_for_inputs(self):
         self.goals = []
+        rospy.set_param('freedrive', True)
         raw_input("Select your cut points from RViz, then hit Enter when you're done...")
+        rospy.set_param('freedrive', False)
 
 if __name__ == '__main__':
     # Testing the point selector functionality

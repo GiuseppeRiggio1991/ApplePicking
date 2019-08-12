@@ -40,5 +40,5 @@
     </group>
 
     <node name="cutpoint_loc_publisher" pkg="tf" type="static_transform_publisher" args="0 -0.0205 -0.045 0 0 0 1 manipulator cutpoint 10" />
-
+    <node name="freedrive_node" pkg="sawyer_planner" type="freedrive_node.py" />
 </launch>
