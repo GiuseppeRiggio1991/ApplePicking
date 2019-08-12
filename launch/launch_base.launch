@@ -33,6 +33,9 @@
         <node name="background_detector" pkg="sawyer_planner" type="background_detector.py" />
         <node name="point_tracker" pkg="sawyer_planner" type="point_tracker.py" unless="$(arg sim)" output="screen" />
         <node name="branch_orientation" pkg="sawyer_planner" type="branch_orientation.py" />
+        <node type="rviz" name="rviz" pkg="rviz" args="-d $(find sawyer_planner)/include/cloud_display.rviz" />
+
+
     </group>
 
     <group unless="$(arg use_camera)">
