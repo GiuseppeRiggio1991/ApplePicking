@@ -131,7 +131,7 @@ class PointTracker(object):
 
     def update_goal_core(self, pc, fg_mask, camera_info):
 
-        goal = deepcopy(self.goal)
+        goal = deepcopy(self.goal_anchor)
         goal.header.stamp = fg_mask.header.stamp
 
         # Convert the current goal to the camera frame
@@ -143,6 +143,7 @@ class PointTracker(object):
 
         goal_in_image = project_to_pixel(goal_camera_array, camera_info)
         if self.image_occlusion_zone.contains_point(goal_in_image):
+            rospy.logwarn_throttle(0.5, "Goal in occlusion zone, not updating...")
             return
 
         # Convert foreground mask to image
