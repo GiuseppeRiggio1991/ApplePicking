@@ -25,6 +25,8 @@ from sklearn.linear_model import LinearRegression
 from skimage.draw import line as draw_line
 from ros_numpy import numpify
 
+numpy_ver = [int(x) for x in np.version.version.split('.')]
+
 class PointTracker(object):
     def __init__(self, debug=True):
 
@@ -158,6 +160,9 @@ class PointTracker(object):
 
         # Extracts the 3D array of points - needs to do some management of structured arrays for efficiency
         pts_struct = numpify(pc)[['x', 'y', 'z']]
+        if numpy_ver[1] >= 15:
+            from numpy.lib.recfunctions import repack_fields
+            pts_struct = repack_fields(pts_struct)
         pts = pts_struct.view((pts_struct.dtype[0], 3))
 
         # Using the old z value, get the points in the point cloud near your new estimate of the goal

@@ -10,6 +10,7 @@ from numpy.linalg import svd
 from visualization_msgs.msg import Marker
 from ros_numpy import numpify
 
+
 rospy.init_node('branch_orientation')
 
 # PARAMS
@@ -18,6 +19,7 @@ radius = rospy.get_param('radius', 0.04)           # How far from the requested 
 # clustering_threshold = rospy.get_param('clustering_threshold', 0.0025)      # For the clustering algorithm, what counts as a neighbor?
 point_centroid_dist = rospy.get_param('point_centroid_dist', 0.5)           # For the return points, how far off the centroid do we want them to be (mostly cosmetic)
 
+numpy_ver = [int(x) for x in np.version.version.split('.')]
 
 def rviz_publish_point(target, frame_id):
     marker = Marker()
@@ -61,8 +63,12 @@ def process_orientation(msg):
     response = CheckBranchOrientationResponse()
 
     pts_struct = numpify(cloud)[['x', 'y', 'z']]
-    all_points = pts_struct.view((pts_struct.dtype[0], 3))
 
+    if numpy_ver[1] >= 15:
+        from numpy.lib.recfunctions import repack_fields
+        pts_struct = repack_fields(pts_struct)
+
+    all_points = pts_struct.view((pts_struct.dtype[0], 3))
     rviz_publish_point(Point(*target), cloud.header.frame_id)
 
     # Filter out points with a higher radius
