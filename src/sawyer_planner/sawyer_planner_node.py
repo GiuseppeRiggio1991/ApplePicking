@@ -108,6 +108,9 @@ class SawyerPlanner:
                         [0.0, 0.0, 0.0, 1.0]
                         ])
 
+        self.soft_abort = False
+        self.soft_abort_srv = rospy.Service('/soft_abort', Empty, self.soft_abort_callback)
+
         self.enable_bridge_pub = rospy.Publisher("/sawyer_planner/enable_bridge", Bool, queue_size = 1)
         self.sim_joint_velocities_pub = rospy.Publisher('sim_joint_velocities', JointTrajectoryPoint, queue_size=1)
 
@@ -242,6 +245,9 @@ class SawyerPlanner:
         tf = self.tf_buffer.lookup_transform(target_frame, base_frame, stamp)
         return tf
 
+    def soft_abort_callback(self, _):
+        self.soft_abort = True
+        return []
 
     def go_to_start(self):
 
@@ -664,6 +670,8 @@ class SawyerPlanner:
                 self.remove_current_apple()
                 self.state = self.STATE.RECOVER
                 # blacklist_goal_srv(self.goal)
+            elif status == 3:
+                self.state = self.STATE.RECOVER
 
                 # self.state = self.STATE.TO_DROP
             # else:
@@ -972,6 +980,11 @@ class SawyerPlanner:
 
         # Main loop which servos towards the goal
         while not rospy.is_shutdown():
+
+            if self.soft_abort:
+                self.soft_abort = False
+                rospy.logwarn('Cancelling current goal and recovering!')
+                return 3
 
             goal = deepcopy(self.current_goal)      # self.goal is updated based off Subscriber
             ee_goal_vector = (np.array(goal) - self.ee_position)[:2]
