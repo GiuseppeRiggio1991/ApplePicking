@@ -79,8 +79,8 @@ def process_orientation(msg):
 
     _, _, v = svd(points_demeaned)
     component_vector = v[0,:]
-    point_1 = Point(*(centroid + point_centroid_dist * component_vector))
-    point_2 = Point(*(centroid - point_centroid_dist * component_vector))
+    point_1 = Point(*(target + point_centroid_dist * component_vector))
+    point_2 = Point(*(target - point_centroid_dist * component_vector))
 
     rviz_publish_line(point_1, point_2, cloud.header.frame_id)
     response.point_1 = point_1
