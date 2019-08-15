@@ -36,8 +36,6 @@ class PointTracker(object):
         self.goal_anchor = None     # Keeps track of the original estimate in the event the tracking gets lost
 
         self.base_frame = 'base_link'
-        self.initial_snap = False
-
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer)
@@ -46,30 +44,48 @@ class PointTracker(object):
         self.active = False
 
         self.image_occlusion_zone = Path(np.array([
-            [539, -1],
-            [537, 30],
-            [493, 88],
-            [478, 182],
-            [485, 238],
-            [511, 275],
-            [640, 275],
-            [640, -1],
-        ]))     # Note that 639 and 0 are inflated to 640 and -1 due to edge detection ambiguities
+            # [539, -1],
+            # [537, 30],
+            # [493, 88],
+            # [478, 182],
+            # [485, 238],
+            # [511, 275],
+            # [640, 275],
+            # [640, -1],
+            [603, -1],
+            [584, 152],
+            [606, 269],
+            [848, 269],
+            [848, -1],
+        ]))
+
+        # Params to estimate the depth estimate error from the beginning
+        self.error_slope = 0.102921
+        self.error_intercept = -.0220562
 
         self.debug = debug
         self.mutex = False
 
-        self.point_cloud_topic = '/camera/depth_registered/points_z_filtered'
+        self.point_cloud_topic = '/camera/depth_registered/points'
         # self.endpoint_frame = endpoint_frame     # This should be changed to whatever endpoint you care about!
 
         self.rviz_pub = rospy.Publisher("visualization_marker", Marker, queue_size=1)
         self.goal_publisher = rospy.Publisher('update_goal_point', Point, queue_size=1)
 
-        pc_subscriber = message_filters.Subscriber(self.point_cloud_topic, PointCloud2)
-        foreground = message_filters.Subscriber('/camera/color/foreground', Image)
-        cam_info = message_filters.Subscriber('/camera/color/camera_info', CameraInfo)
-        sync = message_filters.ApproximateTimeSynchronizer([pc_subscriber, foreground, cam_info], 1, slop=0.2)
-        sync.registerCallback(self.update_goal)
+        self.camera_info = None
+        self.last_foreground = None
+
+        rospy.Subscriber('/camera/color/foreground', Image, self.update_foreground)
+        rospy.Subscriber(self.point_cloud_topic, PointCloud2, self.update_goal_hack)
+        # rospy.Subscriber('/camera/color/camera_info', CameraInfo, self.update_camera_info)
+        # rospy.Subscriber('/camera/color/foreground', Image, self.update_goal)
+
+        # TODO: This synchronizer acts weird! Best to figure out a way to synchronize everything properly
+        # pc_subscriber = message_filters.Subscriber(self.point_cloud_topic, PointCloud2)
+        # foreground = message_filters.Subscriber('/camera/color/foreground', Image)
+        # cam_info = message_filters.Subscriber('/camera/color/camera_info', CameraInfo)
+        # sync = message_filters.ApproximateTimeSynchronizer([pc_subscriber, foreground, cam_info], 1, slop=0.1)
+        # sync.registerCallback(self.update_goal)
 
         rospy.Service('point_tracker_set_goal', SetGoal, self.add_goal)
         rospy.Service('activate_point_tracker', Empty, self.activate)
@@ -84,14 +100,40 @@ class PointTracker(object):
 
     def deactivate(self, *_):
         self.active = False
-        self.initial_snap = False
+
+        self.goal = None
+        self.goal_anchor = None
+
         return []
 
-    def add_goal(self, set_goal_msg):
+    def get_error_coefficient(self, dist):
+        error = max(self.error_slope * dist + self.error_intercept, 0)
+        return 1 + error / dist
 
-        self.goal = create_stamped_point(set_goal_msg.goal.goal)
+    def add_goal(self, set_goal_msg):
+        # TODO: Technically not the best way to get camera_info, but should be good enough?
+        self.camera_info = rospy.wait_for_message('/camera/color/camera_info', CameraInfo)
+
+        camera_base = create_stamped_point(set_goal_msg.goal.camera)
+        goal = create_stamped_point(set_goal_msg.goal.goal)
+        orig_goal = deepcopy(goal)
+
+        camera_pt = point_to_array(camera_base.point)
+        goal_pt = point_to_array(goal.point)
+
+        # Re-adjust the goal with the error model
+        camera_goal_vec = goal_pt - camera_pt
+        dist = np.linalg.norm(camera_goal_vec)
+        coeff = self.get_error_coefficient(dist)
+        new_goal_pt = camera_pt + camera_goal_vec * coeff
+        goal.point = Point(*new_goal_pt)
+
+        self.camera_base = camera_base
+        self.goal = goal
         self.goal_anchor = deepcopy(self.goal)
-        self.camera_base = create_stamped_point(set_goal_msg.goal.camera)
+        self.orig_goal = orig_goal
+
+        self.active = True
 
         p = self.goal.point
 
@@ -119,14 +161,42 @@ class PointTracker(object):
         tf = self.tf_buffer.lookup_transform(target, source, timestamp)
         return tf
 
-    def update_goal(self, pc, fg_mask, camera_info):
+    def update_foreground(self, image):
+        self.last_foreground = image
 
-        if not self.active or self.mutex or self.goal is None:
+    def update_goal_hack(self, pc):
+        if self.goal is None:
             return
+
+        self.mutex = True
+        try:
+            img = deepcopy(self.last_foreground)
+            time_diff = (pc.header.stamp - img.header.stamp).to_sec()
+            rospy.loginfo('Current diff between PC and image is {:.3f} seconds!'.format(time_diff))
+            self.update_goal(pc, img, self.camera_info)
+        finally:
+            self.mutex = False
+
+
+    # def update_goal(self, fg_mask):
+    def update_goal(self, pc, fg_mask, camera_info):
+        if not self.active or self.goal is None:
+            rospy.logwarn_throttle(1.0, 'Not updating goal')
+            return
+
+        rospy.loginfo('Updating goal')
 
         self.mutex = True
 
         try:
+            # camera_info = deepcopy(self.last_camera_info)
+            # pc = self.last_pc
+            #
+            # camera_info_diff = (fg_mask.header.stamp - camera_info.header.stamp).to_sec()
+            # pc_diff = (fg_mask.header.stamp - pc.header.stamp).to_sec()
+            #
+            # rospy.loginfo('Updating goal (time diffs: {:.3f} for camera info, {:.3f} for pointcloud)'.format(camera_info_diff, pc_diff))
+
             self.update_goal_core(pc, fg_mask, camera_info)
         finally:
             self.mutex = False
@@ -145,7 +215,7 @@ class PointTracker(object):
 
         goal_in_image = project_to_pixel(goal_camera_array, camera_info)
         if self.image_occlusion_zone.contains_point(goal_in_image):
-            rospy.logwarn_throttle(0.5, "Goal in occlusion zone, not updating...")
+            rospy.logwarn_throttle(1.5, "Goal in occlusion zone, not updating...")
             return
 
         # Convert foreground mask to image
@@ -164,10 +234,20 @@ class PointTracker(object):
             from numpy.lib.recfunctions import repack_fields
             pts_struct = repack_fields(pts_struct)
         pts = pts_struct.view((pts_struct.dtype[0], 3))
+        if len(pts.shape) == 3:
+            pts = pts.transpose(2,0,1).reshape(3,-1).T
 
-        # Using the old z value, get the points in the point cloud near your new estimate of the goal
-        new_goal = deproject_pixel(new_goal_in_image[0], new_goal_in_image[1], goal_camera.point.z, camera_info)
-        dists = np.linalg.norm(pts - new_goal, axis=1)
+
+
+        # # Using the old z value, get the points in the point cloud near your new estimate of the goal
+        # new_goal = deproject_pixel(new_goal_in_image[0], new_goal_in_image[1], goal_camera.point.z, camera_info)
+
+        z_estimate = goal_camera_array[2]
+
+        # Take the goal anchor and adjust it based on our error model to pick up the points in the point cloud
+        coeff = self.get_error_coefficient(np.linalg.norm(goal_camera_array))
+        dists = np.linalg.norm(pts - goal_camera_array / coeff, axis=1)
+
         filter = dists < 0.03
         pts = pts[filter]
         if pts.shape[0] > 10:  # If not enough points, we just assume the z is unchanged from before (in plane)
@@ -181,9 +261,9 @@ class PointTracker(object):
 
             pix_xy = project_to_pixel(pts, camera_info)
             model = LinearRegression().fit(pix_xy, pts[:, 2], weights)
-            new_z = model.predict([new_goal_in_image])[0]
-            new_goal[2] = new_z
+            z_estimate = model.predict([new_goal_in_image])[0]
 
+        new_goal = deproject_pixel(new_goal_in_image[0], new_goal_in_image[1], z_estimate, camera_info)
         goal.point = Point(*new_goal)
 
         if self.active:     # In case point tracker gets deactivated while this process is running
@@ -200,7 +280,7 @@ class PointTracker(object):
         self.diagnostic_pub.publish(diagnostic_image)
 
 
-    def reconcile_goal_with_branch_points(self, global_goal, pixel_mask, camera_info, max_jump=0.25):
+    def reconcile_goal_with_branch_points(self, global_goal, pixel_mask, camera_info, max_jump=0.05):
         """
         Tries to reconcile an initial global estimate of a goal from a certain position with a set of candidate pixels
         :param global_goal: A StampedPoint object in the base frame
