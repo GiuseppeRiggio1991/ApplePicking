@@ -13,14 +13,14 @@ import math
 
 import rospy
 import rospkg
-from geometry_msgs.msg import Point, Quaternion, PointStamped
+from geometry_msgs.msg import Point, Quaternion, PointStamped, TransformStamped, Vector3
 from geometry_msgs.msg import Pose
 from geometry_msgs.msg import PoseArray
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import JointState, PointCloud2
 from trajectory_msgs.msg import JointTrajectoryPoint
 from trajectory_msgs.msg import JointTrajectory
-from std_msgs.msg import Float32MultiArray
+from std_msgs.msg import Float32MultiArray, Header
 from std_msgs.msg import Bool, String
 from std_srvs.srv import SetBool, Trigger, Empty
 from sawyer_planner.srv import CheckBranchOrientation, SetGoal
@@ -29,9 +29,10 @@ from task_planner.srv import *
 from localisation.srv import *
 from rgb_segmentation.srv import *
 from tf2_ros import TransformListener as TransformListener2, Buffer
-from tf2_geometry_msgs import do_transform_point
+from tf2_geometry_msgs import do_transform_point, do_transform_pose
 from collections import defaultdict
 from pandas import DataFrame
+from tf.transformations import euler_from_quaternion
 
 import pyquaternion
 import socket
@@ -41,7 +42,7 @@ HOME_POSE = True
 
 class SawyerPlanner:
 
-    def __init__(self, metric, goals, sim=True, starting_joints=None, robot_name=None):
+    def __init__(self, metric, goals, sim=True, starting_joints=None, robot_name=None, file_output=None):
 
         """
         Main planner which is tasked with moving to the goals.
@@ -56,6 +57,7 @@ class SawyerPlanner:
         self.sim = sim
 
         self.goals = goals
+        self.approach_poses = None
 
         self.current_goal = [None]          # The coordinates of the point being targeted - can be volatile!
         self.current_iteration = -1
@@ -108,6 +110,7 @@ class SawyerPlanner:
                         [0.0, 0.0, 0.0, 1.0]
                         ])
 
+        # To do: Because of this service, only one SawyerPlanner obj can be active. Not a big deal, but namespace later?
         self.soft_abort = False
         self.soft_abort_srv = rospy.Service('/soft_abort', Empty, self.soft_abort_callback)
 
@@ -203,6 +206,7 @@ class SawyerPlanner:
 
 
         self.logger = Logger()
+        self.file_output = file_output
         if LOGGING:
             import rospkg
             rospack = rospkg.RosPack()
@@ -532,7 +536,11 @@ class SawyerPlanner:
     def save_logs(self):
         if LOGGING:
 
-            file_name = 'results_{}_{}{}'.format(self.sequencing_metric, time.strftime("%Y%m%d-%H%M%S"), '_sim' if self.sim else '')
+            if self.file_output is None:
+                file_name = 'results_{}_{}{}'.format(self.sequencing_metric, time.strftime("%Y%m%d-%H%M%S"), '_sim' if self.sim else '')
+            else:
+                file_name = self.file_output
+
             file_path = os.path.join(self.directory, file_name)
 
             df = self.logger.output_df()
@@ -596,10 +604,12 @@ class SawyerPlanner:
 
             self.openrave_draw_branch()
 
-            plan_success, plan_duration, traj_duration = self.plan_to_goal()
+            plan_success, plan_duration, traj_duration = self.plan_to_goal(self.approach_poses[self.current_sequence_index])
+            rospy.sleep(1.0)
 
             self.logger['planning_time'] = plan_duration
             self.logger['traj_time'] = traj_duration
+            self.logger['id'] = self.current_sequence_index
             self.logger[['gx', 'gy', 'gz']] = self.current_goal_array
 
             rospy.logwarn("TRAJ DURATION: " + str(traj_duration))
@@ -696,8 +706,10 @@ class SawyerPlanner:
                 self.current_goal = point_as_array(pt)
 
                 self.logger.start_timer('cutting_time')
-                self.servo_to_goal(rotate=False, use_visual=False)
+                status = self.servo_to_goal(rotate=False, use_visual=False)
                 self.logger.end_timer('cutting_time')
+
+                self.logger['status'] = status
 
             finally:
                 self.stop_arm()
@@ -832,23 +844,33 @@ class SawyerPlanner:
             self.current_goal = [None]
             return
         if not self.sequence:
+
+            self.approach_poses = []
+
             tasks_msg = PoseArray()
 
-            for planner_goal in self.goals:
+            sequence_goal_index_map = {}
+            sequence_index = 0
+
+            for goal_index, planner_goal in enumerate(self.goals):
                 goal = point_as_array(planner_goal.goal)
                 orientation_reference = point_as_array(planner_goal.orientation)
+                angles = self.generate_feasible_approach_angles(goal=goal, orientation_reference=orientation_reference)
+                for angle in angles:
+                    _, pose, _ = self.get_goal_approach_pose(goal, self.go_to_goal_offset, angle, orientation_reference)
+                    if self.validate_approach_pose(pose):
+                        break
+                else:
+                    rospy.logwarn("Could not find valid approach for goal at {:.3f}, {:.3f}, {:.3f}".format(*goal))
+                    self.approach_poses.append(None)
+                    continue
 
-                angle = self.generate_feasible_approach_angles(samples=1, goal=goal, orientation_reference=orientation_reference)
-                _, pose, _ = self.get_goal_approach_pose(goal, self.go_to_goal_offset, angle, orientation_reference)
-                pose_msg = Pose()
-                pose_msg.orientation.w = pose[0]
-                pose_msg.orientation.x = pose[1]
-                pose_msg.orientation.y = pose[2]
-                pose_msg.orientation.z = pose[3]
-                pose_msg.position.x = pose[4]
-                pose_msg.position.y = pose[5]
-                pose_msg.position.z = pose[6]
+                pose_msg = self.pose_to_ros_msg(pose)
                 tasks_msg.poses.append(pose_msg)
+                self.approach_poses.append(pose_msg)
+
+                sequence_goal_index_map[sequence_index] = goal_index
+                sequence_index += 1
 
             resp = self.sequencer_client.call(tasks_msg, self.sequencing_metric)
             if not len(resp.sequence):
@@ -857,7 +879,7 @@ class SawyerPlanner:
             if len(resp.sequence) != len(self.goals):
                 rospy.logwarn('The sequencer only returned {} out of {} goal points!'.format(len(resp.sequence), len(self.goals)))
 
-            self.sequence = resp.sequence
+            self.sequence = [sequence_goal_index_map[i] for i in resp.sequence]
             print("resp.sequence: " + str(resp.sequence))
         else:
             rospy.logwarn("Called sequence again, but there is already an existing sequence. Doing nothing...")
@@ -972,8 +994,8 @@ class SawyerPlanner:
         if use_visual:
 
             # TODO: A bit hacky, service requires PlannerGoal point, but self.current_goal can be numpy array which differs from PlannerGoal
+
             self.point_tracker_set_goal(self.goals[self.current_sequence_index])
-            self.activate_point_tracker()
 
         # Computes position of arm relative to goal so that we can know when we've moved past goal
         starting_ee_goal_vector = (np.array(goal) - self.ee_position)[:2]
@@ -1144,61 +1166,72 @@ class SawyerPlanner:
 
         return (base_angle + angle_deviations)[ordering]
 
-    def plan_to_goal(self, offset = 0.25, angle = None, ignore_trellis=False):
+
+    def validate_approach_pose(self, approach_pose):
+
+        # Confirm that all poses associated with approach have valid IK solutions and sufficient manipulability
+        # Approach position, post-movement position, and post-cutting position
+
+        goal_approach_offset = np.array([0, 0, self.go_to_goal_offset])
+        goal_approach_position = point_as_array(or_pose_convert_point(goal_approach_offset, approach_pose))
+        post_approach_pose = deepcopy(approach_pose)
+        post_approach_pose[4:] = goal_approach_position
+
+        goal_cutter_offset = goal_approach_offset + point_as_array(self.manipulator_cutpoint_offset.point)
+        cutting_position = point_as_array(or_pose_convert_point(goal_cutter_offset, approach_pose))
+        cutting_pose = deepcopy(approach_pose)
+        cutting_pose[4:] = cutting_position
+
+        for pose in [approach_pose, post_approach_pose, cutting_pose]:
+            ik = self.get_pose_ik(pose)
+            if ik is None:
+                rospy.logwarn('Rejected pose because of invalid IKs for some point in path')
+                return False
+            manip = self.computeReciprocalConditionNumber(ik)
+            if manip < self.MIN_MANIPULABILITY:
+                rospy.logwarn('Rejected pose because of insufficient manipulability for some point in path')
+                return False
+
+        resp = self.check_ray_srv(self.pose_to_ros_msg(approach_pose))
+        return not resp.collision
 
 
-        if angle is not None:
-            angles = [angle]
+    def plan_to_goal(self, plan_pose_msg, ignore_trellis=False):
+
+        failure_return = (False, np.NaN, np.NaN)
+
+        if self.sequencing_metric == 'fredsmp' or self.sequencing_metric == 'hybrid':
+            tasks_msg = PoseArray()
+            tasks_msg.poses.append(plan_pose_msg)
+
+            resp_sequencer = self.sequencer_client.call(tasks_msg, self.sequencing_metric)
+            if len(resp_sequencer.database_trajectories):
+                joint_msg = JointState()
+                joint_msg.position = resp_sequencer.database_trajectories[0].points[-1].positions
+                # resp = self.plan_joints_client(joint_msg, ignore_trellis, True)
+                # resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, True)
+                resp = self.optimise_offset_client(resp_sequencer.database_trajectories[0], True)
+            else:
+                return failure_return
+
+        elif self.sequencing_metric == 'euclidean':
+            # resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, self.sim)
+            resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, True)
+
         else:
-            angles = self.generate_feasible_approach_angles()
+            raise ValueError('Invalid sequencing metric specified!')
 
-        reference = self.current_orientation_ref_array
+        if resp.success:
 
-        for angle in angles:
+            qt = plan_pose_msg.orientation
+            euler_angles = euler_from_quaternion([qt.x, qt.y, qt.z, qt.w])
+            self.logger['a'] = np.pi / 2 + euler_angles[2]
+            self.logger['r'] = euler_angles[1]
 
-            if self.evaluate_goal_approach_manipulability(angle, offset) < self.MIN_MANIPULABILITY_RECOVER:
-                continue
+            return resp.success, resp.plan_duration, resp.traj_duration
 
-            position, pose, _ = self.get_goal_approach_pose(self.current_goal, offset, angle, orientation_reference=reference)
-            resp = self.check_ray_srv(self.pose_to_ros_msg(pose))
-
-            if not resp.collision:
-
-                plan_pose_msg = Pose()
-                plan_pose_msg.position.x = position[0]
-                plan_pose_msg.position.y = position[1]
-                plan_pose_msg.position.z = position[2]
-                plan_pose_msg.orientation.x = pose[1]
-                plan_pose_msg.orientation.y = pose[2]
-                plan_pose_msg.orientation.z = pose[3]
-                plan_pose_msg.orientation.w = pose[0]
-
-                if self.sequencing_metric == 'fredsmp' or self.sequencing_metric == 'hybrid':
-                    tasks_msg = PoseArray()
-                    tasks_msg.poses.append(plan_pose_msg)
-
-                    resp_sequencer = self.sequencer_client.call(tasks_msg, self.sequencing_metric)
-                    if len(resp_sequencer.database_trajectories):
-                        joint_msg = JointState()
-                        joint_msg.position = resp_sequencer.database_trajectories[0].points[-1].positions
-                        # resp = self.plan_joints_client(joint_msg, ignore_trellis, True)
-                        # resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, True)
-                        resp = self.optimise_offset_client(resp_sequencer.database_trajectories[0], True)
-                    else:
-                        continue
-                elif self.sequencing_metric == 'euclidean':
-                    # resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, self.sim)
-                    resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, True)   # Moves it into place
-                else:
-                    raise ValueError()
-
-                if not resp.success:
-                    rospy.logwarn("planning to next target failed")
-                else:
-                    rospy.sleep(1.0)
-                    return resp.success, resp.plan_duration, resp.traj_duration
-
-        return False, numpy.nan, numpy.nan
+        rospy.logwarn("Planning to next target failed!")
+        return failure_return
 
     def plan_to_joints(self, joints):
 
@@ -1366,7 +1399,24 @@ class SawyerPlanner:
 
         if qstart_param_name != None:
             rospy.delete_param(qstart_param_name)
+        self.soft_abort_srv.shutdown()
 
+def or_pose_convert_point(point, or_pose):
+    tf = TransformStamped()
+    tf.header.frame_id = 'base_link'
+    tf.child_frame_id = 'manipulator'
+    tf.transform.translation = Vector3(*or_pose[4:])
+    tf.transform.rotation = Quaternion(or_pose[1], or_pose[2], or_pose[3], or_pose[0])
+
+    pt = PointStamped()
+    pt.header.frame_id = 'manipulator'
+    if isinstance(point, Point):
+        pt.point = point
+    else:
+        pt.point = Point(*point)
+
+    transformed_pt = do_transform_point(pt, tf)
+    return transformed_pt
 
 def point_as_array(pt):
     if isinstance(pt, PointStamped):
@@ -1386,6 +1436,7 @@ class Logger(object):
         self.log = defaultdict(dict)
 
         self.fields = [
+            'id',                       # Unique ID to identify points for same config
             'gx', 'gy', 'gz',           # What are the goal coordinates?
             'a', 'r',                   # What angle did it approach relative to the base frame? What was the roll
             'fgx', 'fgy', 'fgz',        # During the visual update phase, what goal did the cutter eventually settle on?
