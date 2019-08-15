@@ -130,6 +130,7 @@ class SawyerPlanner:
         self.draw_branch_srv = rospy.ServiceProxy('draw_branch', DrawBranch)
         self.clear_point_srv = rospy.ServiceProxy('clear_point', Empty)
         self.check_ray_srv = rospy.ServiceProxy('test_check_ray', CheckRay)
+        self.delete_collision_box_srv = rospy.ServiceProxy('delete_collision_box', Empty)
         self.cut_point_srv = rospy.ServiceProxy('cut_point_srv', GetCutPoint)
         self.get_orientation_srv = rospy.ServiceProxy('branch_orientation', CheckBranchOrientation)
 
@@ -577,6 +578,7 @@ class SawyerPlanner:
             elapsed = self.logger.end_timer('sequencing_time')
 
             self.results_dict['Sequencing Time'].append(elapsed)
+            self.delete_collision_box_srv()
 
             self.state = self.STATE.TO_NEXT
         
