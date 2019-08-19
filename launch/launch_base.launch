@@ -4,10 +4,12 @@
     <arg name="ip" default="127.0.0.1" />
     <arg name="robot" default="ur5" />
     <arg name="use_camera" default="false" />
+    <arg name="debug" default="$(arg sim)" />
 
     <param name="use_camera" value="$(arg use_camera)" />
     <param name="robot_ip" value="$(arg ip)" />
     <param name="tool_speed" value="0.160" />
+    <param name="debug" value="$(arg debug)" />
 
     <param name="/segment_color" value="" />
 
