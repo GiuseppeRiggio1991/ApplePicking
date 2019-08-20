@@ -166,6 +166,12 @@ class PointTracker(object):
 
     def update_goal_hack(self, pc):
         if self.goal is None:
+
+            if self.last_foreground is not None:
+                # Output a blank diagnostic image
+                rgb_frame = cv2.cvtColor(self.bridge.imgmsg_to_cv2(self.last_foreground), cv2.COLOR_GRAY2BGR)
+                diagnostic_image = self.bridge.cv2_to_imgmsg(rgb_frame)
+                self.diagnostic_pub.publish(diagnostic_image)
             return
 
         self.mutex = True
