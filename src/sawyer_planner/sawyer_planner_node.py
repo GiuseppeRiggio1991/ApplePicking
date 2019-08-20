@@ -1022,8 +1022,6 @@ class SawyerPlanner:
             draw_point_msg = Point(*goal)
             self.draw_point_pub.publish(draw_point_msg)
 
-            rospy.loginfo_throttle(0.5, "ee distance from apple: " + str(numpy.linalg.norm(self.ee_position - goal)))
-
             if numpy.linalg.norm(self.ee_position - self.current_goal) < self.stop_update_threshold:
                 # rospy.loginfo_throttle(1.0, "disabling updating of apple position because too close")
                 rotate = False
@@ -1048,7 +1046,11 @@ class SawyerPlanner:
             if not rotate:
                 des_omega = np.zeros(3)
             else:
+                max_magnitude = np.pi / 12  # 15 degrees per second, should help avoid self-collision
                 des_omega = - self.K_VQ * self.get_angular_velocity(goal)
+                total_vel = np.linalg.norm(des_omega)
+                if total_vel > max_magnitude:
+                    des_omega = des_omega * max_magnitude / total_vel
 
             des_vel = numpy.append(des_vel_t, des_omega)
 
