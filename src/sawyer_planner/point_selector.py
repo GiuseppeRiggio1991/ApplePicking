@@ -65,7 +65,17 @@ class PointSelector(object):
     def wait_for_inputs(self):
         self.goals = []
         rospy.set_param('freedrive', True)
-        raw_input("Select your cut points from RViz, then hit Enter when you're done...")
+        while True:
+            myinput = raw_input("Select your cut points from RViz, then hit Enter when you're done. Or type u to remove the last added goal.")
+            if myinput.strip() == 'u':
+                if self.goals:
+                    self.goals = self.goals[:-1]
+                    print('Removed last entry')
+                else:
+                    print('Goals were empty, nothing to remove!')
+            elif not myinput:
+                break
+
         rospy.set_param('freedrive', False)
 
 if __name__ == '__main__':
