@@ -282,10 +282,10 @@ class SawyerPlanner:
                 name = module.SendCommand(
                     'loadURI ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/ur5_cutter.urdf'
                     + ' ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/ur5_cutter.srdf')
-            elif self.robot_name == "ur5_cutter_test":
+            elif self.robot_name.startswith("ur5_cutter"):
                 name = module.SendCommand(
-                    'loadURI ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/ur5_cutter_test.urdf'
-                    + ' ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/ur5_cutter_test.srdf')
+                    'loadURI ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/{}.urdf'.format(self.robot_name)
+                    + ' ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/{}.srdf'.format(self.robot_name))
             else:
                 rospy.logerr("invalid robot name, exiting...")
                 sys.exit()              
