@@ -19,12 +19,14 @@ from pprint import pprint
 from sawyer_planner.point_selector import PointSelector
 from sawyer_planner.msg import PlannerGoal
 from copy import deepcopy
+import random
+import time
 
 LOGGING = True
 # sequencing_metrics = ['hybrid', 'euclidean', 'fredsmp']
 # sequencing_metrics = ['fredsmp', 'euclidean']
-#sequencing_metrics = ['euclidean']
-sequencing_metrics = ['fredsmp']
+# sequencing_metrics = ['euclidean']
+sequencing_metrics = ['fredsmp', 'euclidean']
 num_targets = 5
 num_experiments = 1
 
@@ -138,6 +140,7 @@ if __name__ == "__main__":
     # Load an existing configuration, or create a new one if it doesn't exist
     existing_config = {}
     file_path = ''
+    config_file_name = None
     if len(sys.argv) > 1:
         config_file_name = sys.argv[1].strip()
 
@@ -182,15 +185,39 @@ if __name__ == "__main__":
             else:
                 # If we don't have an RGB target but we're using the camera, we use the point selector in RViz
                 # to select the points we want
+
+                rospack = rospkg.RosPack()
+                home_file_location = os.path.join(rospack.get_path('sawyer_planner'), 'include', 'home_position.pickle')
+
+                home_joints = None
+
+                # Kinda hacky, just for experimental purposes
+                try:
+                    with open(home_file_location, 'rb') as fh:
+                        home_joints = cPickle.load(fh)
+                    dummy_planner.plan_to_joints(home_joints.position)
+                except IOError:
+                    rospy.logwarn('No home position file found')
+                num_targets = np.random.randint(5, 10) + 1      # Pick between 6 and 10 cut points
+
+                cut_targets = sorted(np.random.choice(np.arange(18) + 1, num_targets, replace=False))
+                msg = "Your lucky numbers of the day are:\n{}".format('\n'.join(['\t{}'.format(x) for x in cut_targets]))
+                print(msg)
+
                 selector = PointSelector('base_link', '/camera/depth_registered/points_z_filtered')
                 selector.wait_for_inputs()
                 goals = selector.goals
 
                 del selector
 
+                if home_joints is not None:
+                    dummy_planner.plan_to_joints(home_joints.position)
+
         else:
             # Otherwise we just randomly select points
             goals = gen_goal_and_noise_arrays(dummy_planner, num_targets)
+
+        dummy_planner.clean()
         del dummy_planner
 
         # If we passed in a name for this config, go ahead and save it
@@ -206,8 +233,8 @@ if __name__ == "__main__":
 
 
     # Run the planner loops
-
     still_running = True
+    time_base = time.strftime("%Y%m%d-%H%M%S")
     if sim:
         for i in range(num_experiments):
             rospy.loginfo("STARTING EXPERIMENT " + str(i))
@@ -215,30 +242,47 @@ if __name__ == "__main__":
             for metric in sequencing_metrics:
                 rospy.loginfo("METRIC: " + metric)
                 still_running = True
+                file_output = '{}_{}_{}_sim'.format(config_file_name, time_base, metric)
+
+                import pdb
+
                 planner = sawyer_planner_node.SawyerPlanner(metric, goals, sim=sim, starting_joints=starting_joints,
-                                                            robot_name=robot_name)
+                                                            robot_name=robot_name, file_output=file_output)
+                planner.refresh_octomap()
                 while still_running and not rospy.is_shutdown():
                     still_running = planner.update()
                     rate.sleep()
 
+                planner.clean()
+
     else:
-        metric = sequencing_metrics[0]
+        random.shuffle(sequencing_metrics)
+        octomap_generated = False
+        for metric in sequencing_metrics:
 
-        planner = sawyer_planner_node.SawyerPlanner(metric, goals, sim=sim, robot_name=robot_name)
-        if existing_config:
-            planner.plan_to_joints(starting_joints)
-            planner.initial_joints.position = starting_joints
+            if config_file_name is None:
+                config_file_name = 'results'
 
-        try:
-            while still_running and not rospy.is_shutdown():
-                # print(planner.goal_array)
-                # planner.sequence_goals()
-                still_running = planner.update()
+            rospy.loginfo('METRIC: {}'.format(metric))
+            file_output = '{}_{}_{}'.format(config_file_name, time_base, metric)
+            planner = sawyer_planner_node.SawyerPlanner(metric, goals, sim=sim, robot_name=robot_name, file_output=file_output)
+            if not octomap_generated:
+                octomap_generated = True
+                planner.refresh_octomap()
+            if existing_config:
+                planner.plan_to_joints(starting_joints)
+                planner.initial_joints.position = starting_joints
 
-                rate.sleep()
-        finally:
-            planner.stop_arm()
-            planner.go_to_start()
+            still_running = True
 
+            try:
+                while still_running and not rospy.is_shutdown():
+                    # print(planner.goal_array)
+                    # planner.sequence_goals()
+                    still_running = planner.update()
 
-    rospy.on_shutdown(planner.clean)
+                    rate.sleep()
+            finally:
+                planner.stop_arm()
+                planner.go_to_start()
+                planner.clean()

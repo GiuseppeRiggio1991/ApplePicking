@@ -31,7 +31,7 @@ from rgb_segmentation.srv import *
 from tf2_ros import TransformListener as TransformListener2, Buffer
 from tf2_geometry_msgs import do_transform_point, do_transform_pose
 from collections import defaultdict
-from pandas import DataFrame
+from pandas import DataFrame, Series
 from tf.transformations import euler_from_quaternion
 
 import pyquaternion
@@ -125,7 +125,6 @@ class SawyerPlanner:
         self.optimise_trajectory_client = rospy.ServiceProxy("/optimise_trajectory_srv", OptimiseTrajectory)
         self.sequencer_client = rospy.ServiceProxy("/sequence_tasks_srv", SequenceTasks)
         self.set_robot_joints = rospy.ServiceProxy('set_robot_joints', SetRobotJoints)
-        self.find_ik_solutions_srv = rospy.ServiceProxy('find_ik_solutions', FindIKSolutions)
         self.draw_point_pub = rospy.Publisher('draw_point', Point, queue_size=1)
         self.draw_branch_srv = rospy.ServiceProxy('draw_branch', DrawBranch)
         self.clear_point_srv = rospy.ServiceProxy('clear_point', Empty)
@@ -133,6 +132,12 @@ class SawyerPlanner:
         self.delete_collision_box_srv = rospy.ServiceProxy('delete_collision_box', Empty)
         self.cut_point_srv = rospy.ServiceProxy('cut_point_srv', GetCutPoint)
         self.get_orientation_srv = rospy.ServiceProxy('branch_orientation', CheckBranchOrientation)
+
+        try:
+            rospy.wait_for_service('activate_arduino', 0.1)
+            self.arduino_srv = rospy.ServiceProxy('activate_arduino', Empty)
+        except rospy.ROSException:
+            self.arduino_srv = dummy_function
 
         self.load_octomap = rospy.ServiceProxy('/load_octomap', LoadOctomap)
         self.update_octomap = rospy.ServiceProxy('/update_octomap', Empty)
@@ -545,6 +550,27 @@ class SawyerPlanner:
             file_path = os.path.join(self.directory, file_name)
 
             df = self.logger.output_df()
+
+            to_fill = df.index[df['status'] == 0]
+            while True:
+                user_input = raw_input('{} completed cuts were detected. Please enter a sequence corresponding to the status.\nType 0 for success, 1 for inaccurate, 2 for miss, or just hit enter to mark all success.\n'.format(len(to_fill)))
+                user_input = user_input.strip()
+
+                if not len(user_input):
+                    break
+                elif len(user_input) == len(to_fill):
+                    success_map = {'0': 0, '1': 4, '2': 5}
+                    if set(user_input) - set('012'):
+                        print('Invalid characters detected, please try again...')
+                    values = [success_map[x] for x in user_input]
+                    df.loc[to_fill, 'status'] = values
+                    break
+
+                else:
+                    print('Invalid sequence detected, please try again...\n')
+
+
+
             df.to_pickle(file_path + '.pickle')
             df.to_csv(file_path + '.csv')
 
@@ -566,18 +592,13 @@ class SawyerPlanner:
 
         if self.state == self.STATE.SEARCH:
 
-            self.logger.start_timer('octomap_time')
-            rospy.loginfo("SEARCH")
-            self.refresh_octomap()
-            self.logger.end_timer('octomap_time')
+            # self.logger.start_timer('octomap_time')
+            # rospy.loginfo("SEARCH")
+            # # self.refresh_octomap()
+            # self.logger.end_timer('octomap_time')
 
-            # Sequence the goals here
-
-            self.logger.start_timer('sequencing_time')
             self.sequence_goals()
-            elapsed = self.logger.end_timer('sequencing_time')
-
-            self.results_dict['Sequencing Time'].append(elapsed)
+            # self.results_dict['Sequencing Time'].append(elapsed)
             self.delete_collision_box_srv()
 
             self.state = self.STATE.TO_NEXT
@@ -718,6 +739,8 @@ class SawyerPlanner:
 
             #self.enable_bridge_pub.publish(Bool(False))
 
+            self.arduino_srv()
+
             self.state = self.STATE.CHECK_GRASPING
 
         elif self.state == self.STATE.CHECK_GRASPING:
@@ -853,7 +876,9 @@ class SawyerPlanner:
 
             sequence_goal_index_map = {}
             sequence_index = 0
-
+            
+            self.logger.start_timer('goal_determination_time')
+            
             for goal_index, planner_goal in enumerate(self.goals):
                 goal = point_as_array(planner_goal.goal)
                 orientation_reference = point_as_array(planner_goal.orientation)
@@ -874,7 +899,12 @@ class SawyerPlanner:
                 sequence_goal_index_map[sequence_index] = goal_index
                 sequence_index += 1
 
+            self.logger.end_timer('goal_determination_time')
+
+            self.logger.start_timer('sequencing_time')
             resp = self.sequencer_client.call(tasks_msg, self.sequencing_metric)
+            self.logger.end_timer('sequencing_time')
+
             if not len(resp.sequence):
                 raise Exception('The sequencer failed to return a proper sequence!')
 
@@ -1347,6 +1377,7 @@ class SawyerPlanner:
     def refresh_octomap(self, point = None, camera_frame=False):
 
         if not self.use_camera:
+            self.load_octomap()
             return
 
         if point is None:
@@ -1455,7 +1486,7 @@ class Logger(object):
             'recovery_time',
             'status',                   # What sort of error did we run into, if any?
 
-            'sequencing_time', 'octomap_time',  # One-time costs incurred in the first iteration
+            'goal_determination_time', 'sequencing_time', 'octomap_time',  # One-time costs incurred in the first iteration
         ]
 
     def start_timer(self, event):
