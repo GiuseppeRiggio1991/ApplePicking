@@ -112,7 +112,8 @@ class SawyerPlanner:
 
         # To do: Because of this service, only one SawyerPlanner obj can be active. Not a big deal, but namespace later?
         self.soft_abort = False
-        self.soft_abort_srv = rospy.Service('/soft_abort', Empty, self.soft_abort_callback)
+        if not self.sim:
+            self.soft_abort_srv = rospy.Service('/soft_abort', Empty, self.soft_abort_callback)
 
         self.enable_bridge_pub = rospy.Publisher("/sawyer_planner/enable_bridge", Bool, queue_size = 1)
         self.sim_joint_velocities_pub = rospy.Publisher('sim_joint_velocities', JointTrajectoryPoint, queue_size=1)
@@ -1403,7 +1404,10 @@ class SawyerPlanner:
 
         if qstart_param_name != None:
             rospy.delete_param(qstart_param_name)
-        self.soft_abort_srv.shutdown()
+        try:
+            self.soft_abort_srv.shutdown()
+        except AttributeError:
+            pass
 
 def or_pose_convert_point(point, or_pose):
     tf = TransformStamped()
