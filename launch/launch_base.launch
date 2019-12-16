@@ -5,6 +5,7 @@
     <arg name="robot" default="ur5" />
     <arg name="use_camera" default="false" />
     <arg name="debug" default="$(arg sim)" />
+    <arg name="mount" default="floor" />
 
     <param name="use_camera" value="$(arg use_camera)" />
     <param name="robot_ip" value="$(arg ip)" />
