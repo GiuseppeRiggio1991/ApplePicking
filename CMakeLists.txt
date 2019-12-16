@@ -71,6 +71,9 @@ add_message_files(
    AppleCheck.srv
    CheckBranchOrientation.srv
    SetGoal.srv
+   LoadTrajectory.srv
+   AppendJoints.srv
+   AppendPose.srv
  )
 
 ## Generate actions in the 'action' folder
