@@ -7,11 +7,12 @@ import rospy
 import rospkg
 from geometry_msgs.msg import Pose
 from geometry_msgs.msg import PoseStamped
-from sensor_msgs.msg import JointState
+from sensor_msgs.msg import JointState, Image
 from std_msgs.msg import Header
 from std_srvs.srv import Empty
 from sawyer_planner.srv import LoadTrajectory, AppendJoints, AppendPose
 from online_planner.srv import *
+from message_filters import ApproximateTimeSynchronizer, Subscriber as MsgSubscriber
 
 from rgb_segmentation.srv import *
 import cPickle
@@ -21,7 +22,7 @@ import datetime
 
 class TrajectoryConfig(object):
 
-    def __init__(self, name):
+    def __init__(self, name, ns=None):
         self.name = name
         self.waypoints = []
         self.trajectories = []
@@ -31,14 +32,17 @@ class TrajectoryConfig(object):
         self.plan_joints_client = rospy.ServiceProxy("/plan_joints_srv", PlanJoints)
         self.execute_traj_client = rospy.ServiceProxy("/execute_traj_srv", ExecuteTraj)
 
-        # Services - Cannot create more than one object - NS eventually?
-        self.save_srv = rospy.ServiceProxy("traj_recorder/save_current_traj", Empty, self.save)
-        self.load_srv = rospy.ServiceProxy("traj_recorder/load_traj", LoadTrajectory, self.load)
-        self.append_joints_srv = rospy.ServiceProxy("traj_recorder/append_joints", AppendJoints, self.append_joints)
-        self.append_pose_srv = rospy.ServiceProxy("traj_recorder/append_pose", AppendPose, self.append_pose)
-        self.plan_srv = rospy.ServiceProxy("traj_recorder/plan_all", Empty, self.plan_all)
-        self.playback_srv = rospy.ServiceProxy("traj_recorder/playback", Empty, self.playback)
-        self.plan_to_start_srv = rospy.ServiceProxy("traj_recorder/plan_to_start", Empty, self.plan_to_start)
+        prefix = ''
+        if ns:
+            prefix = '{}/'.format(ns)
+
+        self.save_srv = rospy.Service("{}traj_recorder/save_current_traj".format(prefix), Empty, self.save)
+        self.load_srv = rospy.Service("{}traj_recorder/load_traj".format(prefix), LoadTrajectory, self.load)
+        self.append_joints_srv = rospy.Service("{}traj_recorder/append_joints".format(prefix), AppendJoints, self.append_joints)
+        self.append_pose_srv = rospy.Service("{}traj_recorder/append_pose".format(prefix), AppendPose, self.append_pose)
+        self.plan_srv = rospy.Service("{}traj_recorder/plan_all".format(prefix), Empty, self.plan_all)
+        self.playback_srv = rospy.Service("{}traj_recorder/playback".format(prefix), Empty, self.playback)
+        self.plan_to_start_srv = rospy.Service("{}traj_recorder/plan_to_start".format(prefix), Empty, self.plan_to_start)
 
     @classmethod
     def get_file_path(cls, name):
@@ -49,10 +53,14 @@ class TrajectoryConfig(object):
     def load(self, name, *_, **__):
         if not isinstance(name, str):   # Is a ROS message
             name = name.name.data
-        name.replace('.config', '')
+        name = name.replace('.config', '')
         file_path = self.get_file_path(name)
-        with open(file_path, 'rb') as fh:
-            config = cPickle.load(fh)
+        try:
+            with open(file_path, 'rb') as fh:
+                config = cPickle.load(fh)
+        except IOError:
+            rospy.logerr('Could not find config named {}!'.format(name))
+            return []
 
         self.name = name
         self.waypoints = config['waypoints']
@@ -184,7 +192,7 @@ if __name__ == '__main__':
 
     rospy.init_node('trajectory_playback')
 
-    traj = TrajectoryConfig(datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
+    traj = TrajectoryConfig(datetime.datetime.now().strftime("%Y%m%d_%H%M%S"), ns='traj')
     mode = ''
     if len(sys.argv) > 1:
         mode = sys.argv[1]

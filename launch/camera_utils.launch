@@ -1,0 +1,15 @@
+<launch>
+
+    <arg name="sim" default="true" />
+    <arg name="ip" default="127.0.0.1" />
+    <arg name="robot" default="ur5_camera_wall" />
+    <include file="$(find sawyer_planner)/launch/launch_base.launch">
+        <arg name="sim" value="$(arg sim)" />
+        <arg name="ip" value="$(arg ip)" />
+        <arg name="robot" value="$(arg robot)" />
+    </include>
+
+    <include file="$(find realsense2_camera)/launch/rs_rgbd.launch" />
+    <node name="trajectory_manager" pkg="sawyer_planner" type="trajectory_recorder.py" output="screen" />
+    <node name="image_recorder" pkg="sawyer_planner" type="image_recorder.py" output="screen" />
+</launch>
