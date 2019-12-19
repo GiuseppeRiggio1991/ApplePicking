@@ -3,6 +3,7 @@
 import rospy
 import cPickle
 import os
+import sys
 
 last_file = ''
 last_obj = {}
@@ -11,6 +12,9 @@ data_loc = os.path.join(os.path.expanduser('~'), 'data', 'tree_data')
 publishers = {}
 
 rospy.init_node('image_playback')
+
+if len(sys.argv) > 1:
+    rospy.set_param('playback_file', sys.argv[1])
 
 while not rospy.is_shutdown():
 

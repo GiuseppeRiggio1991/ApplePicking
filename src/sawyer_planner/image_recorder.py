@@ -41,6 +41,8 @@ if __name__ == '__main__':
         MsgSubscriber('/camera/color/image_raw', Image),
         MsgSubscriber('/theia/left/image_raw', Image),
         MsgSubscriber('/theia/right/image_raw', Image),
+        MsgSubscriber('/theia/left/image_rect', Image),
+        MsgSubscriber('/theia/right/image_rect', Image),
         MsgSubscriber('/camera/depth_registered/points', PointCloud2),
     ]
     topics = [s.topic for s in subs]

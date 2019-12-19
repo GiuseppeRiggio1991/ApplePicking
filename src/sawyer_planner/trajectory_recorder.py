@@ -5,14 +5,19 @@ import os
 
 import rospy
 import rospkg
-from geometry_msgs.msg import Pose
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import Pose, Point, Quaternion
+from geometry_msgs.msg import PoseStamped, PointStamped
 from sensor_msgs.msg import JointState, Image
 from std_msgs.msg import Header
 from std_srvs.srv import Empty
 from sawyer_planner.srv import LoadTrajectory, AppendJoints, AppendPose
 from online_planner.srv import *
-from message_filters import ApproximateTimeSynchronizer, Subscriber as MsgSubscriber
+from tf2_ros import TransformListener, Buffer
+from tf2_geometry_msgs import do_transform_point
+import numpy as np
+from tf.transformations import euler_from_quaternion, quaternion_from_euler
+from copy import deepcopy
+
 
 from rgb_segmentation.srv import *
 import cPickle
@@ -31,6 +36,9 @@ class TrajectoryConfig(object):
         self.plan_pose_client = rospy.ServiceProxy("/plan_pose_srv", PlanPose)
         self.plan_joints_client = rospy.ServiceProxy("/plan_joints_srv", PlanJoints)
         self.execute_traj_client = rospy.ServiceProxy("/execute_traj_srv", ExecuteTraj)
+
+        self.buffer = Buffer()
+        self.listener = TransformListener(self.buffer)
 
         prefix = ''
         if ns:
@@ -115,12 +123,16 @@ class TrajectoryConfig(object):
         if up_axis is None:
             up_axis = [0, 0, -1]
 
+        source = convert_pt_to_array(source)
+        target = convert_pt_to_array(target)
+
         goal_off_pose_mat = openravepy.transformLookat(target, source, up_axis)
         goal_off_pose = openravepy.poseFromMatrix(goal_off_pose_mat)
 
         return or_pose_to_ros_msg(goal_off_pose)
 
     def plan(self, waypoint_index):
+
 
         start = self.waypoints[waypoint_index]
         if not isinstance(start, JointState):
@@ -167,7 +179,16 @@ class TrajectoryConfig(object):
             self.execute(i, set_start=True)
             rospy.sleep(0.5)
 
+    def get_manipulator_tf(self):
 
+        now = rospy.Time.now()
+        success = self.buffer.can_transform('base_link', 'manipulator', now, rospy.Duration(1.0))
+        if not success:
+            rospy.logerr("Couldn't look up manip transform! Try again")
+            raise Exception()
+
+        tf = self.buffer.lookup_transform('base_link', 'manipulator', now)
+        return tf
 
 
 
@@ -182,7 +203,14 @@ def or_pose_to_ros_msg(pose):
     pose_msg.position.z = pose[6]
     return pose_msg
 
+def convert_pt_to_array(pt):
+    if isinstance(pt, PointStamped):
+        pt = pt.point
 
+    if isinstance(pt, Point):
+        return np.array([pt.x, pt.y, pt.z])
+
+    return pt
 
 
 
@@ -207,7 +235,7 @@ if __name__ == '__main__':
 
         while True:
             print('What would you like to do?')
-            action = raw_input('j: Add joints\np: Add pose\ns: Save\nl: Load\nv: View\nplan: Plan\nplay: Playback\ne: Execute next\nstart: Move to start\nq: Quit\n').strip()
+            action = raw_input('j: Add joints\np: Add pose\nnr: Add current pose, no-roll\ns: Save\nl: Load\nv: View\nplan: Plan\nplay: Playback\ne: Execute next\nstart: Move to start\nq: Quit\n').strip()
             if action == 'j':
                 print('Enter joints as comma-separated values, or leave empty to use current')
                 joints = input_to_array('Joints: ')
@@ -221,6 +249,27 @@ if __name__ == '__main__':
                 pt_2 = input_to_array('Point 2: ')
 
                 traj.waypoints.append(traj.construct_pose_lookat(pt_2, pt_1))
+
+            elif action == 'nr':
+                # Horizon - takes the current pose and aligns it to the horizon
+                try:
+
+                    tf = traj.get_manipulator_tf()
+
+                    pt_1 = PointStamped()
+                    pt_1.header.frame_id = 'manipulator'
+                    pt_1.point = Point(0, 0, 1)
+
+                    pt_2 = deepcopy(pt_1)
+                    pt_2.point = Point(0, 0, 0)
+
+                    pt_1_tfed = do_transform_point(pt_1, tf)
+                    pt_2_tfed = do_transform_point(pt_2, tf)
+
+                    traj.waypoints.append(traj.construct_pose_lookat(pt_2_tfed, pt_1_tfed))
+                    
+                except Exception:
+                    rospy.logwarn('Something went wrong, try again...')
 
             elif action == 's':
                 traj.save()
