@@ -182,12 +182,12 @@ class TrajectoryConfig(object):
     def get_manipulator_tf(self):
 
         now = rospy.Time.now()
-        success = self.buffer.can_transform('base_link', 'manipulator', now, rospy.Duration(1.0))
+        success = self.buffer.can_transform(rospy.get_param('base_frame'), 'manipulator', now, rospy.Duration(1.0))
         if not success:
             rospy.logerr("Couldn't look up manip transform! Try again")
             raise Exception()
 
-        tf = self.buffer.lookup_transform('base_link', 'manipulator', now)
+        tf = self.buffer.lookup_transform(rospy.get_param('base_frame'), 'manipulator', now)
         return tf
 
 

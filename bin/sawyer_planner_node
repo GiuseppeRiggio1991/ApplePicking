@@ -64,12 +64,20 @@ def gen_goal_and_noise_arrays(planner, num_targets=1):
         while len(solutions) == 0:
             # rand_x = random.uniform(0.65, 0.75)
             # rand_y = random.uniform(-0.35, 0.35)
-            rand_x = random.uniform(0.2, 0.75)
-            rand_y = 1.15-rand_x
-            rand_z = random.uniform(0.2, 0.7)
-            target = [rand_x, rand_y, rand_z]
-            T_robot = transform_target_start(target, planner)
-            pose_msg = planner.pose_to_ros_msg(openravepy.poseFromMatrix(T_robot))
+            # rand_x = random.uniform(0.2, 0.75)
+            # rand_y = 1.15-rand_x
+            # rand_z = random.uniform(0.2, 0.7)
+
+            rand_x = random.uniform(0.5, 1.5)
+            rand_y = random.uniform(-0.3, 0.3)
+            rand_z = random.uniform(-0.3, 0.3)
+            #
+            target = np.array([rand_x, rand_y, rand_z])
+            lookat = target * 1.2
+            pose = openravepy.transformLookat(lookat, target, [0, 0, -1])
+            # target = [0.5, 0.4, 0.5]
+            # pose = openravepy.transformLookat([1.0, 0, 0.5], [0.5, 0.4, 0.5], [0, 0, -1])
+            pose_msg = planner.pose_to_ros_msg(openravepy.poseFromMatrix(pose))
             resp = planner.find_ik_solutions_srv(pose_msg, False)
             solutions = resp.solutions
             print len(solutions)
@@ -81,35 +89,37 @@ def gen_goal_and_noise_arrays(planner, num_targets=1):
         # Add the orientation reference in; tries to make branch "tangent" to robot arm
 
         goal = np.array(target)
-        angle = math.atan2(goal[1], goal[0])
-        r = np.sqrt(goal[0] ** 2 + goal[1] ** 2)
-        rx, ry = r * math.cos(angle + 0.01), r * math.sin(angle + 0.01)  # Creates branch "tangent" to radius
-        rz = goal[2]
+        # angle = math.atan2(goal[1], goal[0])
+        # r = np.sqrt(goal[0] ** 2 + goal[1] ** 2)
+        # rx, ry = r * math.cos(angle + 0.01), r * math.sin(angle + 0.01)  # Creates branch "tangent" to radius
+        # rz = goal[2]
+        #
+        # ref_point = np.array([rx, ry, rz])
+        # diff = ref_point - goal
+        # diff = diff / np.sqrt((diff ** 2).sum())
+        # # This is where the elevation difference comes in
+        # diff[2] = random.choice([0.5, 10, -0.5, -10])
 
-        ref_point = np.array([rx, ry, rz])
-        diff = ref_point - goal
-        diff = diff / np.sqrt((diff ** 2).sum())
-        # This is where the elevation difference comes in
-        diff[2] = random.choice([0.5, 10, -0.5, -10])
-
+        diff = np.random.uniform(-0.5, 0.5, (3,))
         ref_point = goal + diff
-
         orientation_array.append(ref_point)
 
-        while len(solutions_offset) == 0:  # ensure noisy target is reachable
-            x_noise = numpy.random.normal(0.01, 0.01)
-            y_noise = numpy.random.normal(0.0, 0.1)
-            z_noise = numpy.random.normal(0.0, 0.1)
-            noisy_target = numpy.asarray(goal_array[-1] + numpy.asarray([x_noise, y_noise, z_noise]))
-            # print noisy_target
-            T_robot_offset = transform_target_offset(noisy_target, planner)
-            pose_msg = planner.pose_to_ros_msg(openravepy.poseFromMatrix(T_robot_offset))
-            resp = planner.find_ik_solutions_srv(pose_msg, True)
-            solutions_offset = resp.solutions
-            print len(solutions_offset)
-            # solutions_offset = planner.ikmodel.manip.FindIKSolutions(
-            #             T_robot_offset,
-            #             openravepy.IkFilterOptions.CheckEnvCollisions)
+        x_noise = y_noise = z_noise = 0
+
+        # while len(solutions_offset) == 0:  # ensure noisy target is reachable
+        #     x_noise = numpy.random.normal(0.01, 0.01)
+        #     y_noise = numpy.random.normal(0.0, 0.1)
+        #     z_noise = numpy.random.normal(0.0, 0.1)
+        #     noisy_target = numpy.asarray(goal_array[-1] + numpy.asarray([x_noise, y_noise, z_noise]))
+        #     # print noisy_target
+        #     T_robot_offset = transform_target_offset(noisy_target, planner)
+        #     pose_msg = planner.pose_to_ros_msg(openravepy.poseFromMatrix(T_robot_offset))
+        #     resp = planner.find_ik_solutions_srv(pose_msg, True)
+        #     solutions_offset = resp.solutions
+        #     print len(solutions_offset)
+        #     # solutions_offset = planner.ikmodel.manip.FindIKSolutions(
+        #     #             T_robot_offset,
+        #     #             openravepy.IkFilterOptions.CheckEnvCollisions)
         noise_array.append([x_noise, y_noise, z_noise])
         solutions_offset = []
         solutions = []
@@ -182,7 +192,7 @@ if __name__ == "__main__":
             else:
                 # If we don't have an RGB target but we're using the camera, we use the point selector in RViz
                 # to select the points we want
-                selector = PointSelector('base_link', '/camera/depth_registered/points_z_filtered')
+                selector = PointSelector(rospy.get_param('base_frame'), rospy.get_param('global_camera_cloud'))
                 selector.wait_for_inputs()
                 goals = selector.goals
 

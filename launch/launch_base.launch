@@ -6,11 +6,17 @@
     <arg name="use_camera" default="false" />
     <arg name="debug" default="$(arg sim)" />
     <arg name="mount" default="floor" />
+    <arg name="global_camera_cloud" default="" />
+    <arg name="inhand_camera_cloud" default="" />
+    <arg name="base_frame" default="world" />
 
     <param name="use_camera" value="$(arg use_camera)" />
     <param name="robot_ip" value="$(arg ip)" />
     <param name="tool_speed" value="0.160" />
     <param name="debug" value="$(arg debug)" />
+    <param name="base_frame" value="$(arg base_frame)" />
+    <param name="inhand_camera_cloud" value="$(arg inhand_camera_cloud)" />
+    <param name="global_camera_cloud" value="$(arg global_camera_cloud)" />
 
     <param name="/segment_color" value="" />
 

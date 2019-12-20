@@ -35,7 +35,7 @@ class PointTracker(object):
         self.camera_base = None     # For the current goal, records the position of the camera's principal point
         self.goal_anchor = None     # Keeps track of the original estimate in the event the tracking gets lost
 
-        self.base_frame = 'base_link'
+        self.base_frame = rospy.get_param('base_frame')
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer)
@@ -546,7 +546,11 @@ def snap_reference_to_2d_points(reference, points, selection_radius=40, min_dens
 
     return np.array([x_proj.mean(), y_proj.mean()])
 
-def create_stamped_point(point, frame_id='base_link', stamp=None):
+def create_stamped_point(point, frame_id=None, stamp=None):
+
+    if frame_id is None:
+        frame_id = rospy.get_param('base_frame')
+
     if stamp is None:
         stamp = rospy.Time()
     ps = PointStamped()

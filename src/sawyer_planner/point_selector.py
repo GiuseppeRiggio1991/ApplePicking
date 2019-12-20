@@ -14,8 +14,7 @@ from copy import deepcopy
 
 class PointSelector(object):
 
-    def __init__(self, base_frame = 'base_link', point_cloud_topic = '/camera/depth_registered/points_z_filtered'):
-
+    def __init__(self, base_frame, point_cloud_topic):
 
         self.base_frame = base_frame
         self.point_cloud_topic = point_cloud_topic
@@ -81,5 +80,5 @@ class PointSelector(object):
 if __name__ == '__main__':
     # Testing the point selector functionality
     rospy.init_node('point_selector')
-    selector = PointSelector('camera_link', "/camera/depth_registered/points")
+    selector = PointSelector('camera_link', "/point_cloud_inhand")
     rospy.spin()

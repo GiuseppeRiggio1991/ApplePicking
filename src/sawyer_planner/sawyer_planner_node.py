@@ -52,6 +52,8 @@ class SawyerPlanner:
         if self.robot_name is None:
             self.robot_name = rospy.get_param('robot_name')
 
+        self.base_frame = rospy.get_param('base_frame')
+
         print self.robot_name
         self.STATE = enum.Enum('STATE', 'SEARCH TO_NEXT APPROACH GRAB CHECK_GRASPING TO_DROP DROP RECOVER')
         self.sim = sim
@@ -257,7 +259,7 @@ class SawyerPlanner:
 
     def go_to_start(self):
 
-        self.plan_joints_client(self.initial_joints, False, True)
+        self.plan_joints_client(self.initial_joints, False, True, JointState())
 
     def environment_setup(self):
 
@@ -287,6 +289,11 @@ class SawyerPlanner:
                 name = module.SendCommand(
                     'loadURI ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/{}.urdf'.format(self.robot_name)
                     + ' ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/{}.srdf'.format(self.robot_name))
+            elif self.robot_name.startswith("ur5"):
+                name = module.SendCommand(
+                    'loadURI ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/{}.urdf'.format(self.robot_name)
+                    + ' ' + rospack.get_path('fredsmp_utils') + '/robots/ur5/{}.srdf'.format(self.robot_name))
+
             else:
                 rospy.logerr("invalid robot name, exiting...")
                 sys.exit()              
@@ -704,7 +711,7 @@ class SawyerPlanner:
                 # Do this by taking the offset between the endpoint and cutter, treating it as
                 # a point in the manipulator's frame of view, and adjusting the world goal accordingly
 
-                tf = self.retrieve_tf('manipulator', 'base_link')
+                tf = self.retrieve_tf('manipulator', self.base_frame)
                 pt = do_transform_point(self.manipulator_cutpoint_offset, tf)
                 self.current_goal = point_as_array(pt)
 
@@ -1221,7 +1228,7 @@ class SawyerPlanner:
 
         elif self.sequencing_metric == 'euclidean':
             # resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, self.sim)
-            resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, True)
+            resp = self.plan_pose_client(plan_pose_msg, ignore_trellis, True, JointState())
 
         else:
             raise ValueError('Invalid sequencing metric specified!')
@@ -1243,9 +1250,9 @@ class SawyerPlanner:
         joint_msg = JointState()
         joint_msg.header.stamp = rospy.Time.now()
         joint_msg.name = self.initial_joints.name
-        joint_msg.position = joints
+        joint_msg.position = list(joints)
 
-        self.plan_joints_client(joint_msg, False, True)
+        self.plan_joints_client(joint_msg, False, True, JointState())
 
     def get_angular_velocity(self, goal = [None], to_goal = [None]):
         
@@ -1411,7 +1418,7 @@ class SawyerPlanner:
 
 def or_pose_convert_point(point, or_pose):
     tf = TransformStamped()
-    tf.header.frame_id = 'base_link'
+    tf.header.frame_id = rospy.get_param('base_frame')
     tf.child_frame_id = 'manipulator'
     tf.transform.translation = Vector3(*or_pose[4:])
     tf.transform.rotation = Quaternion(or_pose[1], or_pose[2], or_pose[3], or_pose[0])
