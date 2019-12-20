@@ -141,14 +141,9 @@ class SawyerPlanner:
         self.update_octomap = rospy.ServiceProxy('/update_octomap', Empty)
         self.update_octomap_filtered = rospy.ServiceProxy('/update_octomap_filtered', Empty)
 
-        if self.use_camera and not self.target_color:
-            self.activate_point_tracker = rospy.ServiceProxy('/activate_point_tracker', Empty)
-            self.deactivate_point_tracker = rospy.ServiceProxy('/deactivate_point_tracker', Empty)
-            self.point_tracker_set_goal = rospy.ServiceProxy('point_tracker_set_goal', SetGoal)
-        else:
-            self.activate_point_tracker = dummy_function
-            self.deactivate_point_tracker = dummy_function
-            self.point_tracker_set_goal = dummy_function
+        self.activate_point_tracker = get_service_proxy_if_exists('/activate_point_tracker', Empty)
+        self.deactivate_point_tracker = get_service_proxy_if_exists('/deactivate_point_tracker', Empty)
+        self.point_tracker_set_goal = get_service_proxy_if_exists('/point_tracker_set_goal', SetGoal)
         
         #self.enable_bridge_pub.publish(Bool(True))
         self.tf_buffer = Buffer()
@@ -160,7 +155,10 @@ class SawyerPlanner:
         or_joints_pos = numpy.array(or_joint_states.position)
 
         self.initial_joints = rospy.wait_for_message('manipulator_joints', JointState)
-        self.camera_offset_matrix = self.get_transform_matrix('manipulator', 'camera_color_optical_frame')
+
+        inhand_camera_frame = rospy.wait_for_message(rospy.get_param('inhand_camera_cloud'), PointCloud2).header.frame_id
+
+        self.camera_offset_matrix = self.get_transform_matrix('manipulator', inhand_camera_frame)
 
         # Get the offset between the manipulator target and the point that actually does the cutting
         tf = self.retrieve_tf('manipulator', 'cutpoint')
@@ -171,7 +169,7 @@ class SawyerPlanner:
 
         rospy.Subscriber('/update_goal_point', Point, self.update_goal, queue_size=1)
 
-        self.stop_update_threshold = rospy.get_param('/stop_update_threshold', 0.03)
+        self.stop_update_threshold = rospy.get_param('/stop_update_threshold', 0.08)
 
         if self.sim:
             self.stop_arm()
@@ -1006,6 +1004,7 @@ class SawyerPlanner:
             # TODO: A bit hacky, service requires PlannerGoal point, but self.current_goal can be numpy array which differs from PlannerGoal
 
             self.point_tracker_set_goal(self.goals[self.current_sequence_index])
+            self.activate_point_tracker()
 
         # Computes position of arm relative to goal so that we can know when we've moved past goal
         starting_ee_goal_vector = (np.array(goal) - self.ee_position)[:2]
@@ -1503,3 +1502,12 @@ class Logger(object):
 
     def output_df(self):
         return DataFrame(self.log).T.reindex(columns=self.fields)
+
+def get_service_proxy_if_exists(srv_name, srv_class, timeout=0.1, warn=True):
+    try:
+        rospy.wait_for_service(srv_name, timeout=timeout)
+        return rospy.ServiceProxy(srv_name, srv_class)
+    except:
+        if warn:
+            rospy.logwarn('Service {} did not exist, replacing with dummy function...'.format(srv_name))
+        return dummy_function

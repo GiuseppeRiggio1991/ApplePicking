@@ -1,0 +1,32 @@
+<launch>
+
+    <arg name="sim" default="true" />
+    <arg name="ip" default="127.0.0.1" />
+    <arg name="robot" default="ur5_camera_wall" />
+    <arg name="use_camera" default="true" />
+    <arg name="use_servoing" default="false" />
+
+    <!-- Side mount-related transforms -->
+    <node name="global_camera_pub" pkg="tf" type="static_transform_publisher" args="0.173 0.053 -0.063 0 0 0 1 base_link global_camera 10" />
+    <node name="camera_pub" pkg="tf" type="static_transform_publisher" args="-0.030 -0.066 0.098 0 0 0 1 or_tool_link inhand_camera 10" />
+    <node name="tool_link_pub" pkg="tf" type="static_transform_publisher" args="0 0 0 -0.5 0.5 -0.5 0.5 or_ee_link or_tool_link 10" />
+
+    <include file="$(find sawyer_planner)/launch/launch_base.launch">
+        <arg name="sim" value="$(arg sim)" />
+        <arg name="ip" value="$(arg ip)" />
+        <arg name="robot" value="$(arg robot)" />
+        <arg name="global_camera_cloud" value="cloud_bottom_in" />
+        <arg name="inhand_camera_cloud" value="cloud_inhand_filtered" />
+        <arg name="base_frame" value="map" />
+        <arg name="use_camera" value="$(arg use_camera)" />
+    </include>
+
+    <node if="$(arg use_servoing)" name="point_gravitation" pkg="sawyer_planner" type="point_gravitation.py" output="screen" />
+
+
+
+
+
+
+
+</launch>

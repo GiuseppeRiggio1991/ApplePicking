@@ -35,14 +35,14 @@
         </include>
     </group>
     <group if="$(arg use_camera)">
-        <node name="map_camera_publisher" pkg="tf" type="static_transform_publisher" args="0.0266 0.0475 -0.10 0 0 0 1 or_ee_link camera_link 10" />
-        <include file="$(find realsense2_camera)/launch/rs_rgbd.launch" />
+<!--         <node name="map_camera_publisher" pkg="tf" type="static_transform_publisher" args="0.0266 0.0475 -0.10 0 0 0 1 or_ee_link camera_link 10" /> -->
+<!--         <include file="$(find realsense2_camera)/launch/rs_rgbd.launch" /> -->
 <!--        <include file="$(find rgb_segmentation)/launch/rgb_segmentation.launch" />-->
-        <include file="$(find sawyer_planner)/launch/pcl_filter_nodelet.launch" />
-        <node name="background_detector" pkg="sawyer_planner" type="background_detector.py" />
-        <node name="point_tracker" pkg="sawyer_planner" type="point_tracker.py" unless="$(arg sim)" output="screen" />
+<!--         <include file="$(find sawyer_planner)/launch/pcl_filter_nodelet.launch" /> -->
+<!--         <node name="background_detector" pkg="sawyer_planner" type="background_detector.py" /> -->
+<!--         <node name="point_tracker" pkg="sawyer_planner" type="point_tracker.py" unless="$(arg sim)" output="screen" /> -->
         <node name="branch_orientation" pkg="sawyer_planner" type="branch_orientation.py" />
-        <node type="rviz" name="rviz" pkg="rviz" args="-d $(find sawyer_planner)/include/cloud_display.rviz" />
+<!--         <node type="rviz" name="rviz" pkg="rviz" args="-d $(find sawyer_planner)/include/cloud_display.rviz" /> -->
 
 
     </group>
