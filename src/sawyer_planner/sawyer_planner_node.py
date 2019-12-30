@@ -137,15 +137,14 @@ class SawyerPlanner:
         self.cut_point_srv = rospy.ServiceProxy('cut_point_srv', GetCutPoint)
         self.get_orientation_srv = rospy.ServiceProxy('branch_orientation', CheckBranchOrientation)
 
-        self.load_octomap = rospy.ServiceProxy('/load_octomap', LoadOctomap)
-        self.update_octomap = rospy.ServiceProxy('/update_octomap', Empty)
-        self.update_octomap_filtered = rospy.ServiceProxy('/update_octomap_filtered', Empty)
+        self.load_octomap = get_service_proxy_if_exists('/load_octomap', LoadOctomap)
+        self.update_octomap = get_service_proxy_if_exists('/update_octomap', Empty)
+        self.execute_traj_client = rospy.ServiceProxy("/execute_traj_srv", ExecuteTraj)
 
         self.activate_point_tracker = get_service_proxy_if_exists('/activate_point_tracker', Empty)
         self.deactivate_point_tracker = get_service_proxy_if_exists('/deactivate_point_tracker', Empty)
         self.point_tracker_set_goal = get_service_proxy_if_exists('/point_tracker_set_goal', SetGoal)
         
-        #self.enable_bridge_pub.publish(Bool(True))
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener2(self.tf_buffer)
 
@@ -156,7 +155,9 @@ class SawyerPlanner:
 
         self.initial_joints = rospy.wait_for_message('manipulator_joints', JointState)
 
-        inhand_camera_frame = rospy.wait_for_message(rospy.get_param('inhand_camera_cloud'), PointCloud2).header.frame_id
+        inhand_camera_frame = rospy.get_param('inhand_camera_frame', None)
+        if not inhand_camera_frame:
+            inhand_camera_frame = rospy.wait_for_message(rospy.get_param('inhand_camera_cloud'), PointCloud2, 2.0).header.frame_id
 
         self.camera_offset_matrix = self.get_transform_matrix('manipulator', inhand_camera_frame)
 
@@ -1351,50 +1352,13 @@ class SawyerPlanner:
             resp = self.gripper_client.call(True)
 
 
-    def refresh_octomap(self, point = None, camera_frame=False):
+    def refresh_octomap(self):
 
         if not self.use_camera:
             return
 
-        if point is None:
-            self.update_octomap()
-            self.load_octomap()     # Currently assumes arm is still while loading octomap
-        else:
-
-            # If camera_frame is False, point should be expressed in terms of the global coordinates
-            # (or the robot base if the robot is not moving)
-            if not camera_frame:
-                if self.sim:
-                    # Even though the arm moves before approaching the target, for our sim, the camera stays still
-                    # Hence we record the original position of the camera and pretend the camera stays fixed
-                    # and filter out the goal points in the original frame
-                    camera_pose = self.goal_point_camera_pose
-
-                else:
-                    # Otherwise, in a real implementation, the camera moves with the arm
-                    # Therefore we need to express the goal points in the view of the new position of the camera
-                    # so that we can properly filter out the octomap
-                    camera_pose = self.get_camera_pose()
-
-                goal_point_world_mat = numpy.identity(4)
-                goal_point_world_mat[0:3, 3] = point
-                goal_point_camera_mat = numpy.dot(numpy.linalg.inv(camera_pose), goal_point_world_mat)
-                goal_point_camera = goal_point_camera_mat[0:3, 3]
-            else:
-                goal_point_camera = point
-
-            rospy.set_param('/goal_x', goal_point_camera[0].item())
-            rospy.set_param('/goal_y', goal_point_camera[1].item())
-            rospy.set_param('/goal_z', goal_point_camera[2].item())
-
-            self.update_octomap_filtered()
-
-        # TODO: BUG: Load_octomap for simulation will refresh the octomap in reference to the current camera position,
-        # however for simulation it should refresh it with respect to the original camera position
-        self.load_octomap()
-        rospy.set_param('/goal_x', False)
-        rospy.set_param('/goal_y', False)
-        rospy.set_param('/goal_z', False)
+        self.update_octomap()
+        self.load_octomap()     # Currently assumes arm is still while loading octomap
 
 
     def clean(self):

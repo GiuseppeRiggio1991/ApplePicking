@@ -181,22 +181,14 @@ if __name__ == "__main__":
         dummy_planner = sawyer_planner_node.SawyerPlanner('euclidean', [], sim=sim, robot_name=robot_name)
 
         if use_camera:
-            if target_color:
-                raise NotImplementedError('Segmenting off color is temporarily disabled')
-                # # If we have an RGB target set, we're assumed to be color-based tracking (e.g. colored tape)
-                # dummy_planner.rgb_segment_set_goal()
-                # goal_array = dummy_planner.goal_array
-                # orientation_array = dummy_planner.orientation_array
-                # noise_array = dummy_planner.noise_array
 
-            else:
-                # If we don't have an RGB target but we're using the camera, we use the point selector in RViz
-                # to select the points we want
-                selector = PointSelector(rospy.get_param('base_frame'), rospy.get_param('global_camera_cloud'))
-                selector.wait_for_inputs()
-                goals = selector.goals
+            # If we don't have an RGB target but we're using the camera, we use the point selector in RViz
+            # to select the points we want
+            selector = PointSelector(rospy.get_param('base_frame'), rospy.get_param('global_camera_cloud'))
+            selector.wait_for_inputs()
+            goals = selector.goals
 
-                del selector
+            del selector
 
         else:
             # Otherwise we just randomly select points
@@ -236,6 +228,7 @@ if __name__ == "__main__":
 
         planner = sawyer_planner_node.SawyerPlanner(metric, goals, sim=sim, robot_name=robot_name)
         if existing_config:
+
             planner.plan_to_joints(starting_joints)
             planner.initial_joints.position = starting_joints
 

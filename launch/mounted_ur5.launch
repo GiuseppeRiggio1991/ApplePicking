@@ -11,12 +11,19 @@
     <node name="camera_pub" pkg="tf" type="static_transform_publisher" args="-0.030 -0.066 0.098 0 0 0 1 or_tool_link inhand_camera 10" />
     <node name="tool_link_pub" pkg="tf" type="static_transform_publisher" args="0 0 0 -0.5 0.5 -0.5 0.5 or_ee_link or_tool_link 10" />
 
+    <!-- This corresponds to the world_joint link in the robot's URDF file. Maybe automate this someday? -->
+    <group if="$(arg sim)">
+        <node name="base_link_world_tf_publisher" pkg="tf" type="static_transform_publisher" args="0 0 0 0 0.70711 0 0.70711 world base_link 10"/>
+    </group>
+
     <include file="$(find sawyer_planner)/launch/launch_base.launch">
         <arg name="sim" value="$(arg sim)" />
         <arg name="ip" value="$(arg ip)" />
         <arg name="robot" value="$(arg robot)" />
         <arg name="global_camera_cloud" value="cloud_bottom_in" />
+        <arg name="global_camera_frame" value="global_camera" />
         <arg name="inhand_camera_cloud" value="cloud_inhand_filtered" />
+        <arg name="inhand_camera_frame" value="inhand_camera" />
         <arg name="base_frame" value="map" />
         <arg name="use_camera" value="$(arg use_camera)" />
     </include>

@@ -7,7 +7,9 @@
     <arg name="debug" default="$(arg sim)" />
     <arg name="mount" default="floor" />
     <arg name="global_camera_cloud" default="" />
+    <arg name="global_camera_frame" default="global_camera" />
     <arg name="inhand_camera_cloud" default="" />
+    <arg name="inhand_camera_frame" default="inhand_camera" />
     <arg name="base_frame" default="world" />
 
     <param name="use_camera" value="$(arg use_camera)" />
@@ -16,7 +18,9 @@
     <param name="debug" value="$(arg debug)" />
     <param name="base_frame" value="$(arg base_frame)" />
     <param name="inhand_camera_cloud" value="$(arg inhand_camera_cloud)" />
+    <param name="inhand_camera_frame" value="$(arg inhand_camera_frame)" />
     <param name="global_camera_cloud" value="$(arg global_camera_cloud)" />
+    <param name="global_camera_frame" value="$(arg global_camera_frame)" />
 
     <param name="/segment_color" value="" />
 
@@ -35,8 +39,6 @@
         </include>
     </group>
     <group if="$(arg use_camera)">
-<!--         <node name="map_camera_publisher" pkg="tf" type="static_transform_publisher" args="0.0266 0.0475 -0.10 0 0 0 1 or_ee_link camera_link 10" /> -->
-<!--         <include file="$(find realsense2_camera)/launch/rs_rgbd.launch" /> -->
 <!--        <include file="$(find rgb_segmentation)/launch/rgb_segmentation.launch" />-->
 <!--         <include file="$(find sawyer_planner)/launch/pcl_filter_nodelet.launch" /> -->
 <!--         <node name="background_detector" pkg="sawyer_planner" type="background_detector.py" /> -->
@@ -45,10 +47,6 @@
 <!--         <node type="rviz" name="rviz" pkg="rviz" args="-d $(find sawyer_planner)/include/cloud_display.rviz" /> -->
 
 
-    </group>
-
-    <group unless="$(arg use_camera)">
-        <node name="map_camera_publisher" pkg="tf" type="static_transform_publisher" args="0.0266 0.0625 -0.10 -0.5 0.5 -0.5 0.5 or_ee_link camera_color_optical_frame 10" />
     </group>
 
     <node name="cutpoint_loc_publisher" pkg="tf" type="static_transform_publisher" args="0 -0.0205 -0.045 0 0 0 1 manipulator cutpoint 10" />
