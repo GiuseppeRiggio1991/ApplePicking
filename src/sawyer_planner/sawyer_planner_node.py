@@ -27,7 +27,6 @@ from sawyer_planner.srv import CheckBranchOrientation, SetGoal
 from online_planner.srv import *
 from task_planner.srv import *
 from localisation.srv import *
-from rgb_segmentation.srv import *
 from tf2_ros import TransformListener as TransformListener2, Buffer
 from tf2_geometry_msgs import do_transform_point, do_transform_pose
 from collections import defaultdict
@@ -134,7 +133,6 @@ class SawyerPlanner:
         self.clear_point_srv = rospy.ServiceProxy('clear_point', Empty)
         self.check_ray_srv = rospy.ServiceProxy('test_check_ray', CheckRay)
         self.delete_collision_box_srv = rospy.ServiceProxy('delete_collision_box', Empty)
-        self.cut_point_srv = rospy.ServiceProxy('cut_point_srv', GetCutPoint)
         self.get_orientation_srv = rospy.ServiceProxy('branch_orientation', CheckBranchOrientation)
 
         self.load_octomap = get_service_proxy_if_exists('/load_octomap', LoadOctomap)
@@ -155,11 +153,13 @@ class SawyerPlanner:
 
         self.initial_joints = rospy.wait_for_message('manipulator_joints', JointState)
 
-        inhand_camera_frame = rospy.get_param('inhand_camera_frame', None)
-        if not inhand_camera_frame:
-            inhand_camera_frame = rospy.wait_for_message(rospy.get_param('inhand_camera_cloud'), PointCloud2, 2.0).header.frame_id
+        self.camera_offset_matrix = None
+        if self.use_camera:
+            inhand_camera_frame = rospy.get_param('inhand_camera_frame', None)
+            if not inhand_camera_frame:
+                inhand_camera_frame = rospy.wait_for_message(rospy.get_param('inhand_camera_cloud'), PointCloud2, 2.0).header.frame_id
 
-        self.camera_offset_matrix = self.get_transform_matrix('manipulator', inhand_camera_frame)
+            self.camera_offset_matrix = self.get_transform_matrix('manipulator', inhand_camera_frame)
 
         # Get the offset between the manipulator target and the point that actually does the cutting
         tf = self.retrieve_tf('manipulator', 'cutpoint')
@@ -370,55 +370,6 @@ class SawyerPlanner:
             return np.linalg.inv(camera_pose)
         else:
             return camera_pose
-
-
-    def rgb_segment_goal(self, pose_array = None, ee_pose = None, retrieve_cloud = False):
-
-        cut_points = []
-        cut_points_msg = None
-        rospy.set_param('segment_color', self.target_color)
-
-        # Use RGB segmentation to retrieve the camera-frame points to cut
-        if pose_array is None:
-
-            cut_points_msg = self.cut_point_srv.call(Bool(retrieve_cloud))
-
-            rospy.loginfo('{} points of interest found!'.format(len(cut_points_msg.cut_points.poses)))
-            pose_array = cut_points_msg.cut_points
-            pose_array = self.refine_points(pose_array)
-            if len(pose_array.poses) != len(cut_points_msg.cut_points.poses):
-                rospy.loginfo('(Condensed to {} points)'.format(len(pose_array.poses)))
-
-        # Transform the camera-frame points to the global frame
-        if ee_pose is None:
-            ee_pose = self.ee_pose
-        camera_pose = self.get_camera_pose(ee_pose=ee_pose)
-        for cut_pose in pose_array.poses:
-            transformed_point = self.transform_point(cut_pose.position, tf_matrix=camera_pose)
-            cut_points.append(transformed_point)
-
-        return cut_points, camera_pose, cut_points_msg
-
-    # def rgb_segment_set_goal(self):
-    #
-    #     # Retrieve the cut points as well as the cloud info, necessary for orientation retrieval
-    #     cut_points, camera_pose, srv_response = self.rgb_segment_goal(retrieve_cloud=True)
-    #     self.goal_array = cut_points
-    #     self.goal_point_camera_pose = camera_pose
-    #     cloud = srv_response.pointcloud
-    #
-    #     inverse_camera_pose = np.linalg.inv(camera_pose)
-    #     orientation_markers = []
-    #
-    #     for point in cut_points:
-    #
-    #         # Global points must be transformed back into camera frame to be processed by cloud
-    #         point_camera_frame = self.transform_point(point, tf_matrix=inverse_camera_pose)
-    #         res = self.get_orientation_srv(Point(*point_camera_frame), cloud)
-    #         orientation_markers.append(self.transform_point(res.point_1, tf_matrix=camera_pose))
-    #
-    #     self.orientation_array = orientation_markers
-    #
 
     def get_cutter_goal_orientation(self, goal=None, reference=None, camera_inverse=None):
 
