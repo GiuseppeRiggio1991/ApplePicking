@@ -32,6 +32,7 @@ from tf2_geometry_msgs import do_transform_point, do_transform_pose
 from collections import defaultdict
 from pandas import DataFrame
 from tf.transformations import euler_from_quaternion
+from ur_dashboard_msgs.srv import Load
 
 import pyquaternion
 import socket
@@ -134,6 +135,10 @@ class SawyerPlanner:
         self.check_ray_srv = rospy.ServiceProxy('test_check_ray', CheckRay)
         self.delete_collision_box_srv = rospy.ServiceProxy('delete_collision_box', Empty)
         self.get_orientation_srv = rospy.ServiceProxy('branch_orientation', CheckBranchOrientation)
+        if not self.sim:
+            self.program_load_srv = rospy.ServiceProxy('/ur_hardware_interface/dashboard/load_program', Load)
+            self.program_play_srv = rospy.ServiceProxy('/ur_hardware_interface/dashboard/play', Trigger)
+            self.program_stop_srv = rospy.ServiceProxy('/ur_hardware_interface/dashboard/stop', Trigger)
 
         self.load_octomap = get_service_proxy_if_exists('/load_octomap', LoadOctomap)
         self.update_octomap = get_service_proxy_if_exists('/update_octomap', Empty)
@@ -153,13 +158,14 @@ class SawyerPlanner:
 
         self.initial_joints = rospy.wait_for_message('manipulator_joints', JointState)
 
-        self.camera_offset_matrix = None
         if self.use_camera:
             inhand_camera_frame = rospy.get_param('inhand_camera_frame', None)
             if not inhand_camera_frame:
                 inhand_camera_frame = rospy.wait_for_message(rospy.get_param('inhand_camera_cloud'), PointCloud2, 2.0).header.frame_id
 
             self.camera_offset_matrix = self.get_transform_matrix('manipulator', inhand_camera_frame)
+        else:
+            self.camera_offset_matrix = np.identity(4)
 
         # Get the offset between the manipulator target and the point that actually does the cutting
         tf = self.retrieve_tf('manipulator', 'cutpoint')
@@ -240,6 +246,11 @@ class SawyerPlanner:
         return point_as_array(self.goals[self.current_sequence_index].orientation)
 
 
+    def enable_external_control(self):
+        if not self.sim:
+            self.program_load_srv('extcontrol.urp')
+            self.program_play_srv()
+
     def retrieve_tf(self, base_frame, target_frame, stamp = rospy.Time()):
 
         # Retrieves a TransformStamped with a child frame of base_frame and a target frame of target_frame
@@ -258,6 +269,7 @@ class SawyerPlanner:
 
     def go_to_start(self):
 
+        self.enable_external_control()
         self.plan_joints_client(self.initial_joints, False, True, JointState())
 
     def environment_setup(self):
@@ -692,6 +704,8 @@ class SawyerPlanner:
 
         elif self.state == self.STATE.RECOVER:
 
+            self.enable_external_control()
+
             rospy.loginfo("RECOVER")
             self.recovery_flag = True
             self.start_recovery_time = rospy.get_time()
@@ -725,6 +739,8 @@ class SawyerPlanner:
             rospy.loginfo("TO_DROP")
 
             rospy.sleep(0.1)
+
+            self.enable_external_control()
 
             if numpy.linalg.norm(numpy.asarray(self.recovery_trajectory[-1]) - numpy.asarray(self.recovery_trajectory[0])) > 0.01:
                 self.recovery_trajectory.append(self.manipulator_joints)
@@ -1163,6 +1179,7 @@ class SawyerPlanner:
 
         failure_return = (False, np.NaN, np.NaN)
 
+        self.enable_external_control()
         if self.sequencing_metric == 'fredsmp' or self.sequencing_metric == 'hybrid':
             tasks_msg = PoseArray()
             tasks_msg.poses.append(plan_pose_msg)
@@ -1203,6 +1220,7 @@ class SawyerPlanner:
         joint_msg.name = self.initial_joints.name
         joint_msg.position = list(joints)
 
+        self.enable_external_control()
         self.plan_joints_client(joint_msg, False, True, JointState())
 
     def get_angular_velocity(self, goal = [None], to_goal = [None]):

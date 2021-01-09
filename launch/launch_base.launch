@@ -25,7 +25,7 @@
     <param name="/segment_color" value="" />
 
     <group unless="$(arg sim)">
-        <include file="$(find ur_modern_driver)/launch/ur5e_bringup.launch">
+        <include file="$(find ur_robot_driver)/launch/ur5e_bringup.launch">
             <arg name="robot_ip" value="$(arg ip)" />
         </include>
         <include file="$(find localisation)/launch/localisation.launch">
@@ -39,7 +39,6 @@
         </include>
     </group>
     <group if="$(arg use_camera)">
-<!--        <include file="$(find rgb_segmentation)/launch/rgb_segmentation.launch" />-->
 <!--         <include file="$(find sawyer_planner)/launch/pcl_filter_nodelet.launch" /> -->
 <!--         <node name="background_detector" pkg="sawyer_planner" type="background_detector.py" /> -->
 <!--         <node name="point_tracker" pkg="sawyer_planner" type="point_tracker.py" unless="$(arg sim)" output="screen" /> -->
@@ -49,6 +48,6 @@
 
     </group>
 
-    <node name="cutpoint_loc_publisher" pkg="tf" type="static_transform_publisher" args="0 -0.0205 -0.045 0 0 0 1 manipulator cutpoint 10" />
-    <node name="freedrive_node" pkg="sawyer_planner" type="freedrive_node.py" />
+    <node name="cutpoint_loc_publisher" pkg="tf" type="static_transform_publisher" args="0 0 0 0 0 0 1 manipulator cutpoint 10" />
+<!--     <node name="ur_mode_manager" pkg="sawyer_planner" type="ur_mode_manager.py" /> -->
 </launch>

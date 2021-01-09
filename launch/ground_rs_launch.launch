@@ -2,7 +2,7 @@
 
     <arg name="sim" default="true" />
     <arg name="ip" default="127.0.0.1" />
-    <arg name="robot" default="ur5_cutter_modified" />
+    <arg name="robot" default="ur5_cutter_new" />
     <arg name="use_camera" default="true" />
     <arg name="use_servoing" default="false" />
 

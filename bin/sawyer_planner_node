@@ -23,8 +23,8 @@ from copy import deepcopy
 LOGGING = True
 # sequencing_metrics = ['hybrid', 'euclidean', 'fredsmp']
 # sequencing_metrics = ['fredsmp', 'euclidean']
-#sequencing_metrics = ['euclidean']
-sequencing_metrics = ['fredsmp']
+sequencing_metrics = ['euclidean']
+# sequencing_metrics = ['fredsmp']
 num_targets = 5
 num_experiments = 1
 
@@ -64,13 +64,13 @@ def gen_goal_and_noise_arrays(planner, num_targets=1):
         while len(solutions) == 0:
             # rand_x = random.uniform(0.65, 0.75)
             # rand_y = random.uniform(-0.35, 0.35)
-            # rand_x = random.uniform(0.2, 0.75)
-            # rand_y = 1.15-rand_x
-            # rand_z = random.uniform(0.2, 0.7)
+            rand_x = random.uniform(0.2, 0.75)
+            rand_y = 1.15-rand_x
+            rand_z = random.uniform(0.2, 0.7)
 
-            rand_x = random.uniform(0.5, 1.5)
-            rand_y = random.uniform(-0.3, 0.3)
-            rand_z = random.uniform(-0.3, 0.3)
+            # rand_x = random.uniform(0.5, 1.5)
+            # rand_y = random.uniform(-0.3, 0.3)
+            # rand_z = random.uniform(-0.3, 0.3)
             #
             target = np.array([rand_x, rand_y, rand_z])
             lookat = target * 1.2

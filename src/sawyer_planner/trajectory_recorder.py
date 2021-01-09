@@ -17,9 +17,6 @@ from tf2_geometry_msgs import do_transform_point
 import numpy as np
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
 from copy import deepcopy
-
-
-from rgb_segmentation.srv import *
 import cPickle
 
 import datetime
